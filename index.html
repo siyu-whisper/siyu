@@ -6,8 +6,8 @@
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BoxwIc6u.svg" />
-  <script type="module" crossorigin src="/siyu/assets/index-CWdCUzNO.js"></script>
-  <link rel="stylesheet" crossorigin href="/siyu/assets/index-Yr7DIaqu.css">
+  <script type="module" crossorigin src="/siyu/assets/index-BQGYGloQ.js"></script>
+  <link rel="stylesheet" crossorigin href="/siyu/assets/index-DUQolh1g.css">
 </head>
 <body>
   <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
@@ -117,7 +117,7 @@
         </div>
       </div>
 
-      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，默认隔绝麦克风人声、仅传电脑原声，支持一键开关人声混音） -->
+      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，默认隔绝麦克风人声、仅传电脑原声，支持一键开关人声混音与纯净全屏） -->
       <div id="cinema-stage" class="cinema-stage hidden">
         <div class="cinema-header">
           <div class="cinema-title-group">
@@ -125,16 +125,27 @@
             <span id="cinema-audio-badge" class="cinema-audio-badge">仅电脑原声（人声已隔绝）</span>
           </div>
           <div class="cinema-controls">
+            <button id="toggle-local-preview-btn" type="button" class="cinema-ctrl-btn hidden" title="共享整个桌面时默认折叠本机画面以防止无限镜面重影">
+              👁️ 展开本机预览
+            </button>
             <button id="toggle-share-mic-btn" type="button" class="cinema-mic-btn hidden" title="切换是否将你的麦克风说话人声混入屏幕共享">
               🎙️ 混入人声: 关
+            </button>
+            <button id="toggle-cinema-fullscreen-btn" type="button" class="cinema-ctrl-btn" title="进入或退出全屏影院模式">
+              ⛶ 全屏观看
             </button>
             <button id="stop-screen-share-btn" type="button" class="cinema-stop-btn hidden">
               停止共享
             </button>
           </div>
         </div>
-        <video id="shared-screen-video" class="shared-screen-video" autoplay playsinline controls></video>
-        <img id="shared-screen-fallback-img" class="shared-screen-video hidden" alt="屏幕共享同步画面" />
+        <div id="cinema-viewport" class="cinema-viewport">
+          <div id="sharer-mirror-guard" class="sharer-mirror-guard hidden">
+            <span>正在向对方实时传输高清画面（已默认隐藏本机镜面，避免桌面无限重影与绿屏）</span>
+          </div>
+          <video id="shared-screen-video" class="shared-screen-video" autoplay playsinline controls controlsList="nofullscreen"></video>
+          <img id="shared-screen-fallback-img" class="shared-screen-video hidden" alt="屏幕共享同步画面" />
+        </div>
       </div>
 
       <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
