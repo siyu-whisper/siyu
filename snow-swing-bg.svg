@@ -1,31 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" preserveAspectRatio="xMidYMid slice">
   <defs>
+    <!-- 迷雾天空渐变 -->
     <linearGradient id="skyMist" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#efefef"/>
       <stop offset="52%" stop-color="#e8e8e8"/>
       <stop offset="72%" stop-color="#dedede"/>
       <stop offset="100%" stop-color="#cccccc"/>
     </linearGradient>
+
+    <!-- 远山隐约左雾影 -->
     <radialGradient id="leftSlope" cx="0.06" cy="0.52" r="0.48">
       <stop offset="0%" stop-color="#cfcfcf" stop-opacity="0.65"/>
       <stop offset="65%" stop-color="#dcdcdc" stop-opacity="0.22"/>
       <stop offset="100%" stop-color="#e8e8e8" stop-opacity="0"/>
     </radialGradient>
+
+    <!-- 远山隐约右雾影 -->
     <radialGradient id="rightSlope" cx="0.95" cy="0.54" r="0.45">
       <stop offset="0%" stop-color="#cccccc" stop-opacity="0.68"/>
       <stop offset="60%" stop-color="#dadada" stop-opacity="0.25"/>
       <stop offset="100%" stop-color="#e8e8e8" stop-opacity="0"/>
     </radialGradient>
+
+    <!-- 雪原地面明暗过渡 -->
     <linearGradient id="snowGround" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#e2e2e2" stop-opacity="0.1"/>
       <stop offset="22%" stop-color="#dcdcdc" stop-opacity="0.85"/>
       <stop offset="65%" stop-color="#d0d0d0" stop-opacity="0.96"/>
       <stop offset="100%" stop-color="#bcbcbc" stop-opacity="1"/>
     </linearGradient>
+
+    <!-- 暗角镜头感 -->
     <radialGradient id="vignette" cx="0.5" cy="0.48" r="0.68">
       <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
       <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
     </radialGradient>
+
+    <!-- 雾化柔焦滤镜 -->
     <filter id="softBlur" x="-10%" y="-10%" width="120%" height="120%">
       <feGaussianBlur stdDeviation="3.5"/>
     </filter>
@@ -35,6 +46,8 @@
     <filter id="shadowBlur" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur stdDeviation="8"/>
     </filter>
+
+    <!-- 衣服毛呢质感微渐变 -->
     <linearGradient id="darkCoat" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#353535"/>
       <stop offset="50%" stop-color="#222222"/>
@@ -52,11 +65,17 @@
     </linearGradient>
   </defs>
 
+  <!-- 1. 浩渺白雾背景 -->
   <rect width="1600" height="1080" fill="url(#skyMist)"/>
+
+  <!-- 2. 两侧隐入浓雾的远山轮廓（还原原图左右极淡的灰阶山谷感） -->
   <path d="M0 240 Q210 420 380 650 L0 680 Z" fill="url(#leftSlope)" filter="url(#softBlur)"/>
   <path d="M1600 220 Q1380 430 1210 660 L1600 680 Z" fill="url(#rightSlope)" filter="url(#softBlur)"/>
+
+  <!-- 3. 苍茫雪原地表 -->
   <rect x="0" y="610" width="1600" height="470" fill="url(#snowGround)"/>
 
+  <!-- 4. 雪地起伏与漫射阴影 -->
   <g filter="url(#shadowBlur)" opacity="0.55">
     <ellipse cx="810" cy="775" rx="180" ry="14" fill="#a8a8a8"/>
     <ellipse cx="420" cy="845" rx="260" ry="20" fill="#b5b5b5"/>
@@ -64,6 +83,7 @@
     <ellipse cx="780" cy="950" rx="460" ry="30" fill="#aeaeae"/>
   </g>
 
+  <!-- 5. 雪地浅脚印与雪坑细节（还原原图前景斑驳雪印） -->
   <g fill="#8c8c8c" filter="url(#footprintBlur)">
     <ellipse cx="485" cy="780" rx="12" ry="3.2" opacity="0.28"/>
     <ellipse cx="535" cy="812" rx="14" ry="3.8" opacity="0.25"/>
@@ -83,54 +103,71 @@
     <ellipse cx="215" cy="965" rx="19" ry="5.2" opacity="0.34"/>
   </g>
 
+  <!-- 6. 中央极简秋千架（1:1 还原附图比例与结构） -->
   <g id="swing-structure">
+    <!-- 顶部原木横梁 -->
     <rect x="688" y="381" width="266" height="14" rx="4" fill="#1e1e1e"/>
     <rect x="688" y="381" width="266" height="4" rx="2" fill="#464646" opacity="0.65"/>
+    <!-- 横梁固定铁箍 -->
     <rect x="708" y="379.5" width="7" height="17" rx="1.5" fill="#0f0f0f"/>
     <rect x="727" y="379.5" width="6" height="17" rx="1.5" fill="#0f0f0f"/>
     <rect x="911" y="379.5" width="6" height="17" rx="1.5" fill="#0f0f0f"/>
     <rect x="927" y="379.5" width="7" height="17" rx="1.5" fill="#0f0f0f"/>
 
+    <!-- 左右外倾立柱 -->
     <line x1="712" y1="393" x2="669" y2="754" stroke="#232323" stroke-width="5.5" stroke-linecap="round"/>
     <line x1="930" y1="393" x2="985" y2="756" stroke="#232323" stroke-width="5.5" stroke-linecap="round"/>
 
+    <!-- 雪地柱脚锚点与积雪压痕 -->
     <ellipse cx="670" cy="756" rx="16" ry="4.5" fill="#1a1a1a"/>
     <ellipse cx="986" cy="758" rx="14" ry="4.5" fill="#1a1a1a"/>
 
+    <!-- 两根垂直秋千吊绳与挂钩环 -->
     <circle cx="730" cy="398" r="3.2" fill="none" stroke="#222222" stroke-width="1.8"/>
     <circle cx="914" cy="398" r="3.2" fill="none" stroke="#222222" stroke-width="1.8"/>
     <line x1="730" y1="401" x2="740" y2="660" stroke="#2c2c2c" stroke-width="2.6"/>
     <line x1="914" y1="401" x2="907" y2="660" stroke="#2c2c2c" stroke-width="2.6"/>
+    <!-- 左侧辅助侧拉索 -->
     <line x1="712" y1="415" x2="740" y2="656" stroke="#3a3a3a" stroke-width="1.6" opacity="0.75"/>
     <line x1="929" y1="415" x2="907" y2="656" stroke="#3a3a3a" stroke-width="1.6" opacity="0.75"/>
   </g>
 
+  <!-- 7. 秋千上的双人背影（左侧深色大衣男士，右侧浅灰大衣金发女士，并肩依偎） -->
   <g id="couple-silhouette">
+    <!-- 右侧人物悬垂双腿与短靴（在座板下方） -->
     <path d="M843 668 L846 728 L855 728 L854 668 Z" fill="#181818"/>
     <path d="M869 668 L867 729 L876 729 L879 668 Z" fill="#181818"/>
+    <!-- 靴底与雪面微距阴影 -->
     <ellipse cx="850" cy="733" rx="8" ry="3.2" fill="#0d0d0d"/>
     <ellipse cx="872" cy="734" rx="8" ry="3.2" fill="#0d0d0d"/>
     <ellipse cx="861" cy="742" rx="28" ry="5" fill="#888888" opacity="0.45" filter="url(#footprintBlur)"/>
 
+    <!-- 左侧人物悬垂脚尖微露 -->
     <ellipse cx="786" cy="680" rx="6" ry="3.5" fill="#1c1c1c"/>
     <ellipse cx="812" cy="681" rx="6" ry="3.5" fill="#1c1c1c"/>
 
+    <!-- 左侧人物：深炭色冬衣背影 -->
     <path d="M757 662
              C754 632, 756 604, 764 590
              C771 579, 783 574, 798 574
              C814 574, 825 580, 831 593
              C836 605, 836 635, 832 662 Z"
           fill="url(#darkCoat)"/>
+    <!-- 左侧人物衣领与肩线细节 -->
     <path d="M782 576 Q798 582 814 576" stroke="#111111" stroke-width="3" fill="none"/>
+    <!-- 左侧人物头部（微向右侧伴侣倾靠） -->
     <ellipse cx="799" cy="556" rx="12.5" ry="15" transform="rotate(6 799 556)" fill="#242424"/>
 
+    <!-- 右侧人物：浅灰羊毛大衣背影 -->
     <path d="M829 662
              C827 634, 829 605, 836 591
              C843 579, 853 575, 864 575
              C876 575, 886 581, 891 595
              C895 608, 893 636, 889 662 Z"
           fill="url(#lightCoat)"/>
+    <!-- 右侧人物腰线与衣褶微暗调 -->
     <path d="M835 628 Q861 633 886 628" stroke="#5c5c5c" stroke-width="2" fill="none" opacity="0.6"/>
+    <!-- 右侧人物头部与披肩浅色长发 -->
     <ellipse cx="859" cy="557" rx="12" ry="14.5" transform="rotate(-5 859 557)" fill="#bdbdbd"/>
     <path d="M846 552
              C842 566, 841 584, 847 596
@@ -139,9 +176,11 @@
              C865 542, 852 542, 846 552 Z"
           fill="url(#blondeHair)"/>
 
+    <!-- 秋千木质座板（托住两人底部） -->
     <rect x="735" y="659" width="184" height="11" rx="2.5" fill="#161616"/>
     <rect x="735" y="659" width="184" height="2.5" rx="1" fill="#4a4a4a" opacity="0.5"/>
   </g>
 
+  <!-- 8. 柔和电影感暗角 -->
   <rect width="1600" height="1080" fill="url(#vignette)"/>
 </svg>
