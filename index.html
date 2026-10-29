@@ -17,30 +17,50 @@
   </script>
 </head>
 <body>
-  <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
+  <!-- 柔和国风底纹层（#E9E8EF 云水缣素 × #494266 暮山黛紫 × 疏竹暗纹） -->
   <div class="ambient-backdrop" aria-hidden="true">
     <div class="ambient-mist"></div>
+    <!-- 右上角水墨疏竹意境暗纹（呼应中国风对撞色卡右上角竹叶） -->
+    <svg class="ambient-bamboo" viewBox="0 0 420 360" fill="none">
+      <g opacity="0.13" fill="#494266">
+        <path d="M420 0C360 42 308 98 258 168C295 122 352 72 420 26Z"/>
+        <path d="M348 52C312 62 262 78 214 96C258 92 306 82 348 64Z"/>
+        <path d="M332 82C302 112 272 152 246 196C280 162 310 124 338 92Z"/>
+        <path d="M286 126C244 134 198 148 158 166C202 162 246 150 288 136Z"/>
+        <path d="M386 96C358 134 334 178 316 226C344 188 368 144 392 106Z"/>
+        <path d="M268 158C248 192 232 230 222 268C242 234 258 198 274 164Z"/>
+        <path d="M362 32C330 28 286 30 242 38C284 42 326 42 362 40Z"/>
+      </g>
+    </svg>
   </div>
 
   <main class="app-shell">
-    <!-- ==================== 1. 网站首页（极简三段式相框装裱构图） ==================== -->
+    <!-- ==================== 1. 网站首页（极简三段式美术馆相框装裱构图） ==================== -->
     <section id="landing-view" class="view-panel landing-panel" aria-label="私语首页">
       <div class="landing-card">
-        <!-- 顶部：L1 折页耳语图标 + 私语 + S3 Slogan（无外框极简居中） -->
+        <!-- 顶部：L1 折页耳语图标 + 私语 + S3 Slogan -->
         <header class="brand-header">
-          <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="48" height="48" />
+          <div class="logo-halo">
+            <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="50" height="50" />
+          </div>
           <h1 class="brand-title">私语</h1>
           <p class="brand-subtitle">有些话不必惊动世界，读完便融进风里。</p>
         </header>
 
-        <!-- 中央：画廊装裱相框 + 图2旧报长椅私语画芯 -->
+        <!-- 中央：双层衬纸美术馆相框 + 图2旧报长椅私语画芯 -->
         <div class="gallery-frame">
-          <div class="gallery-artwork-wrap">
-            <img src="./hero-couple.jpg" alt="长椅旧报私语" class="gallery-artwork-img" />
+          <div class="gallery-mat-border">
+            <div class="gallery-artwork-wrap">
+              <img src="./hero-couple.jpg" alt="长椅旧报私语" class="gallery-artwork-img" />
+            </div>
+          </div>
+          <div class="gallery-caption">
+            <span>SIYU · EPHEMERAL WHISPER</span>
+            <span>阅后即焚</span>
           </div>
         </div>
 
-        <!-- 底部：黛紫对撞色开启按钮 -->
+        <!-- 底部：暮山黛紫 × 云水灰白开启按钮 -->
         <div class="landing-actions">
           <button id="start-whisper-btn" type="button" class="primary-whisper-btn">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -55,10 +75,10 @@
 
     <!-- ==================== 2. 聊天主界面（房间激活时展示） ==================== -->
     <section id="chat-view" class="view-panel chat-panel hidden" aria-label="私语对话窗口">
-      <!-- 顶部固定栏：Logo + 房间状态指示 + 方案A国风代号印章 + “结束并清除”按钮 -->
+      <!-- 顶部固定栏：Logo + 房间状态指示 + 方案A国风代号印章 + 音视频快捷入口 + “结束并清除”按钮 -->
       <header class="chat-topbar">
         <div class="topbar-left">
-          <img src="./logo.svg" alt="私语" class="brand-logo-sm" width="30" height="30" />
+          <img src="./logo.svg" alt="私语" class="brand-logo-sm" width="32" height="32" />
           <span class="topbar-brand">私语</span>
           <span class="topbar-divider" aria-hidden="true"></span>
           <div id="connection-badge" class="status-badge status-waiting" role="status" aria-live="polite">
@@ -84,12 +104,12 @@
         </div>
 
         <div class="topbar-right">
-          <button id="toggle-invite-btn" type="button" class="ghost-icon-btn" title="显示或隐藏邀请链接">
+          <button id="toggle-invite-btn" type="button" class="ghost-icon-btn" title="展开或收起密函邀请凭据">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <span class="hide-xs">邀请链接</span>
+            <span class="hide-xs">密函链接</span>
           </button>
 
           <button id="end-and-clear-btn" type="button" class="danger-burn-btn">
@@ -103,15 +123,17 @@
         </div>
       </header>
 
-      <!-- 房间邀请链接面板（展示可复制的 #room=<房间ID> 链接 + 默认2人/最大5人上限设置） -->
+      <!-- 房间邀请链接面板（精致胶囊式密函凭据条 + 默认2人/最大5人上限设置） -->
       <div id="invite-bar" class="invite-bar">
         <div class="invite-info">
-          <span class="invite-label">私语邀请链接（高熵凭证，发给对方即可直连）：</span>
           <div class="invite-url-row">
-            <input id="invite-link-input" type="text" class="invite-url-input" readonly aria-label="房间邀请链接" />
+            <div class="invite-input-capsule">
+              <span class="invite-tag-badge">密函</span>
+              <input id="invite-link-input" type="text" class="invite-url-input" readonly aria-label="房间邀请链接" />
+            </div>
             <button id="copy-link-btn" type="button" class="copy-link-btn">复制链接</button>
             <label class="max-peers-control" for="max-peers-select" title="设置房间最大允许进入人数（默认2人，最高5人）">
-              <span class="max-peers-label">人数上限</span>
+              <span class="max-peers-label">上限</span>
               <select id="max-peers-select" class="max-peers-select" aria-label="房间最大人数上限">
                 <option value="2" selected>2人 (默认)</option>
                 <option value="3">3人</option>
@@ -121,6 +143,73 @@
             </label>
           </div>
           <span id="invite-format-hint" class="invite-format-hint"></span>
+        </div>
+      </div>
+
+      <!-- 实时语音/视频通话来电邀请横幅 -->
+      <div id="call-invite-banner" class="call-invite-banner hidden" role="alert">
+        <div class="call-invite-info">
+          <span class="call-ring-dot"></span>
+          <span id="call-invite-text" class="call-invite-text">对方邀请你进行实时语音通话...</span>
+        </div>
+        <div class="call-invite-actions">
+          <button id="accept-call-btn" type="button" class="call-accept-btn">接听</button>
+          <button id="decline-call-btn" type="button" class="call-decline-btn">婉拒</button>
+        </div>
+      </div>
+
+      <!-- 实时语音与视频对话主舞台（支持纯语音声波对话、双人视频画中画、静音、开关摄像头、全屏与挂断） -->
+      <div id="live-call-stage" class="live-call-stage hidden">
+        <div class="live-call-header">
+          <div class="live-call-title-group">
+            <span class="live-call-dot"></span>
+            <span id="live-call-status-text" class="live-call-title">实时语音通话中</span>
+            <span id="live-call-timer" class="live-call-timer">00:00</span>
+          </div>
+          <div class="live-call-controls">
+            <button id="call-toggle-mic-btn" type="button" class="cinema-ctrl-btn" title="静音或取消静音麦克风">
+              🎙️ 麦克风: 开
+            </button>
+            <button id="call-toggle-cam-btn" type="button" class="cinema-ctrl-btn" title="开启或关闭摄像头视频画面">
+              📷 摄像头: 关
+            </button>
+            <button id="call-fullscreen-btn" type="button" class="cinema-ctrl-btn" title="全屏切换">
+              ⛶ 全屏
+            </button>
+            <button id="hangup-call-btn" type="button" class="cinema-stop-btn" title="挂断并结束本次通话">
+              📴 挂断
+            </button>
+          </div>
+        </div>
+
+        <div id="live-call-body" class="live-call-body">
+          <!-- 纯语音通话声波视图 -->
+          <div id="call-audio-avatar-view" class="call-audio-avatar-view">
+            <div class="call-participant-card">
+              <span id="call-self-seal" class="call-avatar-circle">听</span>
+              <span id="call-self-name" class="call-avatar-name">听风 · 我</span>
+            </div>
+            <div class="call-soundwave-bridge" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <div class="call-participant-card">
+              <span id="call-peer-seal" class="call-avatar-circle is-peer">枕</span>
+              <span id="call-peer-name" class="call-avatar-name">对方</span>
+            </div>
+          </div>
+
+          <!-- 视频通话画中画视图 -->
+          <div id="call-video-grid-view" class="call-video-grid-view hidden">
+            <video id="call-remote-video" class="call-remote-video" autoplay playsinline></video>
+            <img id="call-remote-fallback-img" class="call-remote-video hidden" alt="对方视频画面" />
+            <div class="call-local-pip-wrap">
+              <video id="call-local-video" class="call-local-video" autoplay playsinline muted></video>
+              <span class="call-pip-tag">我</span>
+            </div>
+          </div>
+
+          <!-- 隐藏的远端音频播放器（确保纯语音模式下远端人声清晰播放） -->
+          <audio id="call-remote-audio" autoplay class="hidden"></audio>
         </div>
       </div>
 
@@ -155,44 +244,62 @@
         </div>
       </div>
 
-      <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
+      <!-- 极简消息列表区域（区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
       <div id="message-list" class="message-list" role="log" aria-live="polite">
         <div id="empty-chat-hint" class="empty-chat-hint">
-          <p>消息仅驻留于当前内存，支持发送文字、图片、语音与屏幕同看</p>
-          <p class="empty-sub">未读 × · 已读 ✓ · 支持撤回与文字重刷 · 任一人点击结束则全员退出且链接失效</p>
+          <div class="empty-ornament" aria-hidden="true">❖</div>
+          <p class="empty-main-text">方寸私语，仅驻此刻内存</p>
+          <p class="empty-sub">支持文字、图片、语音短讯、实时音视频通话与屏幕同看 · 任一人结束即全员焚毁</p>
         </div>
       </div>
 
-      <!-- 底部输入区（支持盒子IM风格语音录制、图片发送、屏幕同看、文字输入 + 发送按钮） -->
+      <!-- 底部悬浮坞式输入区（支持语音短讯、图片、实时语音通话、视频连麦、屏幕同看、文字输入） -->
       <footer class="chat-composer">
         <!-- 常规输入栏 -->
         <div id="composer-normal-row" class="composer-row">
-          <!-- 语音录制按钮 -->
-          <button id="voice-record-btn" type="button" class="tool-btn" title="录制语音私语" aria-label="录制语音">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="9" y="2" width="6" height="12" rx="3"/>
-              <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
+          <div class="composer-tools-dock">
+            <!-- 语音短讯录制按钮 -->
+            <button id="voice-record-btn" type="button" class="tool-btn" title="录制语音短讯" aria-label="录制语音">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="9" y="2" width="6" height="12" rx="3"/>
+                <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
 
-          <!-- 图片选择按钮 -->
-          <button id="image-pick-btn" type="button" class="tool-btn" title="发送图片（支持粘贴或拖拽）" aria-label="发送图片">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="3" width="18" height="18" rx="3"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <path d="M21 15l-5-5L5 21" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <input id="image-file-input" type="file" accept="image/*" class="hidden" />
+            <!-- 图片选择按钮 -->
+            <button id="image-pick-btn" type="button" class="tool-btn" title="发送图片（支持粘贴或拖拽）" aria-label="发送图片">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="3" y="3" width="18" height="18" rx="3"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <path d="M21 15l-5-5L5 21" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <input id="image-file-input" type="file" accept="image/*" class="hidden" />
 
-          <!-- 共享屏幕/一起看电影按钮 -->
-          <button id="screen-share-btn" type="button" class="tool-btn" title="分享屏幕或浏览器标签页（支持同步看电影/视频）" aria-label="共享屏幕一起看">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="2" y="3" width="20" height="14" rx="2.5"/>
-              <path d="M8 21h8M12 17v4" stroke-linecap="round"/>
-              <polygon points="10,7.5 15.5,10 10,12.5" fill="currentColor" stroke="none"/>
-            </svg>
-          </button>
+            <!-- 实时语音通话按钮 -->
+            <button id="voice-call-btn" type="button" class="tool-btn" title="发起实时语音通话" aria-label="实时语音通话">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+
+            <!-- 实时视频连麦按钮 -->
+            <button id="video-call-btn" type="button" class="tool-btn" title="发起实时视频连麦" aria-label="实时视频连麦">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="5" width="14" height="14" rx="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <polygon points="22 7 16 12 22 17 22 7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+
+            <!-- 共享屏幕/一起看电影按钮 -->
+            <button id="screen-share-btn" type="button" class="tool-btn" title="分享屏幕或浏览器标签页（支持同步看电影/视频）" aria-label="共享屏幕一起看">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="3" width="20" height="14" rx="2.5"/>
+                <path d="M8 21h8M12 17v4" stroke-linecap="round"/>
+                <polygon points="10,7.5 15.5,10 10,12.5" fill="currentColor" stroke="none"/>
+              </svg>
+            </button>
+          </div>
 
           <!-- 文字输入框 -->
           <input
@@ -236,14 +343,22 @@
     <section id="terminated-view" class="view-panel landing-panel terminated-panel hidden" aria-label="对话已结束终态">
       <div class="landing-card">
         <header class="brand-header">
-          <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="48" height="48" />
+          <div class="logo-halo">
+            <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="50" height="50" />
+          </div>
           <h2 id="terminated-title" class="brand-title">私语</h2>
           <p id="terminated-desc" class="brand-subtitle">话已燃尽，一切随风去吧。</p>
         </header>
 
         <div class="gallery-frame">
-          <div class="gallery-artwork-wrap">
-            <img src="./end-burn.jpg" alt="话已燃尽，随风而去" class="gallery-artwork-img" />
+          <div class="gallery-mat-border">
+            <div class="gallery-artwork-wrap">
+              <img src="./end-burn.jpg" alt="话已燃尽，随风而去" class="gallery-artwork-img" />
+            </div>
+          </div>
+          <div class="gallery-caption">
+            <span>SIYU · GONE WITH THE WIND</span>
+            <span>痕迹已清</span>
           </div>
         </div>
 
