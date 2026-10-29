@@ -1,6 +1,6 @@
 # 私语 (Siyu) — 极简、无后端、点对点临时私密聊天
 
-> **在线体验（GitHub Pages）**：[https://vincentzhang-code.github.io/siyu/](https://vincentzhang-code.github.io/siyu/)
+> **在线体验（GitHub Pages）**：[https://siyu-whisper.github.io/siyu/](https://siyu-whisper.github.io/siyu/)
 >
 > **核心原则**：消息不经过任何应用服务器，不写入任何持久化存储（零 `localStorage` / `sessionStorage` / `IndexedDB` / `Cookie`），关闭页面或点击“结束并清除”后双方数据同时从内存中清除，房间链接随即失效。
 
@@ -57,7 +57,7 @@ git init
 git add .
 git commit -m "feat: initial release of Siyu ephemeral P2P chat"
 git branch -M main
-git remote add origin https://github.com/<你的GitHub用户名>/<仓库名>.git
+git remote add origin https://github.com/siyu-whisper/siyu.git
 git push -u origin main
 ```
 
