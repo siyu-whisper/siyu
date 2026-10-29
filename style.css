@@ -519,16 +519,44 @@ body {
   color: var(--ink-muted);
 }
 
+/* 屏幕共享或全屏激活时关闭毛玻璃 backdrop-filter，根治 Chromium/Edge 显卡硬件加速下的绿屏渲染故障 */
+body.is-screen-sharing .chat-panel,
+body.is-screen-sharing .chat-topbar,
+body.is-screen-sharing .chat-composer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #F6F5FB;
+}
+
 /* 一起看 / 屏幕共享放映区 */
 .cinema-stage {
   width: 100%;
-  background: #1d1a2b;
+  background: #181524;
   border-bottom: 1px solid var(--card-border);
-  padding: 8px 16px 12px;
+  padding: 10px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+/* 影院级全屏状态（兼容原生 Fullscreen API 与页内全屏兜底） */
+.cinema-stage:fullscreen,
+.cinema-stage:-webkit-full-screen,
+.cinema-stage.is-theater-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 9999 !important;
+  background: #0b0a10 !important;
+  padding: 14px 24px 20px !important;
+  border: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
 }
 
 .cinema-header {
@@ -537,6 +565,7 @@ body {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .cinema-title-group {
@@ -547,7 +576,7 @@ body {
 }
 
 .cinema-title {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--brand-mist);
   letter-spacing: 0.04em;
@@ -565,11 +594,13 @@ body {
 .cinema-controls {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.cinema-mic-btn {
-  padding: 3px 10px;
+.cinema-mic-btn,
+.cinema-ctrl-btn {
+  padding: 4px 10px;
   font-size: 11.5px;
   color: var(--brand-mist);
   background: rgba(233, 232, 239, 0.14);
@@ -579,6 +610,11 @@ body {
   transition: background 0.15s ease;
 }
 
+.cinema-mic-btn:hover,
+.cinema-ctrl-btn:hover {
+  background: rgba(233, 232, 239, 0.24);
+}
+
 .cinema-mic-btn.is-active {
   background: #257a58;
   border-color: rgba(255, 255, 255, 0.35);
@@ -586,7 +622,7 @@ body {
 }
 
 .cinema-stop-btn {
-  padding: 3px 10px;
+  padding: 4px 11px;
   font-size: 11.5px;
   color: #ffffff;
   background: var(--danger-bg);
@@ -595,12 +631,43 @@ body {
   cursor: pointer;
 }
 
+.cinema-viewport {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.sharer-mirror-guard {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(233, 232, 239, 0.07);
+  border: 1px dashed rgba(233, 232, 239, 0.22);
+  color: #cbc7dc;
+  font-size: 12px;
+  text-align: center;
+}
+
 .shared-screen-video {
   width: 100%;
-  max-height: 240px;
+  max-height: 250px;
   border-radius: 10px;
-  background: #0f0d17;
+  background: #0b0a10;
   object-fit: contain;
+}
+
+.cinema-stage:fullscreen .shared-screen-video,
+.cinema-stage:-webkit-full-screen .shared-screen-video,
+.cinema-stage.is-theater-fullscreen .shared-screen-video {
+  width: 100% !important;
+  height: calc(100vh - 70px) !important;
+  max-height: none !important;
+  border-radius: 8px;
+  object-fit: contain !important;
 }
 
 /* ==================== 消息列表区域（#494266 × #E9E8EF 对撞气泡 + 撤回/修改/已读） ==================== */
