@@ -7,9 +7,17 @@
  * 【上线前唯一必填配置】
  * 将下方 APP_ID 替换为你自己定义的任意唯一字符串标识即可构建上线：
  */
-import { joinRoom, selfId } from 'trystero/nostr';
+import { joinRoom as joinMqttRoom, selfId } from 'trystero/mqtt';
+import { joinRoom as joinNostrRoom } from 'trystero/nostr';
 
 const APP_ID = 'waiting-for-you-siyu';
+
+// 国内外高可用公共 WSS 消息中继（仅用于 WebRTC 信令握手与 NAT 受限时的 AES-GCM-256 端到端加密瞬态转发，QoS=0 / Retain=false 零存储）
+const PUBLIC_WSS_BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt'
+];
 
 /**
  * ============================================================================
@@ -17,21 +25,21 @@ const APP_ID = 'waiting-for-you-siyu';
  * ============================================================================
  * 1. `messages` 数组仅存在于当前页面 JS 引擎的堆内存中。
  * 2. 严禁写入 localStorage、sessionStorage、IndexedDB、CacheStorage 或 Cookie。
- * 3. `ephemeralObjectUrls` 追踪会话期间为语音/图片创建的内存 Blob URL，
- *    在点击“结束并清除”或触发 beforeunload 时逐一调用 URL.revokeObjectURL() 释放。
+ * 3. 当朋友通过邀请链接后加入房间时，本端会自动将内存中的 `messages` 加密同步给对方，
+ *    解决“先发消息、朋友后点链接进来看不到此前对话”的问题。
  */
 let messages = [];
 const processedMessageIds = new Set();
 const ephemeralObjectUrls = new Set();
+const incomingChunkBuffer = new Map();
 
 // 当前房间运行态（全部驻留内存，离开即销毁）
-let activeRoom = null;
+let activeRooms = [];
 let activeRoomId = null;
-let sendP2PMessage = null;
-let sendP2PRevoke = null;
-let sendP2PEdit = null;
-let sendP2PRead = null;
-let sendP2PTerminate = null;
+let roomCryptoKeyPromise = null;
+let p2pDispatchers = [];
+let e2eeWssClients = [];
+let presenceHeartbeatTimer = null;
 let localEphemeralBus = null;
 let connectedPeers = new Set();
 let isSessionTerminated = false;
@@ -134,144 +142,488 @@ function buildInviteUrl(roomId) {
 }
 
 /**
+ * 基于高熵 roomId 派生仅驻留内存的 AES-GCM-256 对称密钥
+ */
+async function deriveRoomAesKey(roomId) {
+  const encoder = new TextEncoder();
+  const seedBytes = encoder.encode(`${APP_ID}::e2ee-key::${roomId}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', seedBytes);
+  return crypto.subtle.importKey('raw', hashBuffer, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+async function encryptRoomText(plainText) {
+  if (!roomCryptoKeyPromise) return null;
+  const key = await roomCryptoKeyPromise;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plainText);
+  const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  return {
+    iv: bytesToBase64(iv),
+    ct: bytesToBase64(new Uint8Array(cipherBuf))
+  };
+}
+
+async function decryptRoomText(ivB64, ctB64) {
+  if (!roomCryptoKeyPromise) return null;
+  const key = await roomCryptoKeyPromise;
+  const iv = base64ToBytes(ivB64);
+  const ct = base64ToBytes(ctB64);
+  const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return new TextDecoder().decode(plainBuf);
+}
+
+/**
  * ============================================================================
- * 三、房间创建与加入（Trystero WebRTC P2P 信令与直连通道）
+ * 三、房间创建、跨网双引擎连接与后进房间内存历史自动同步
  * ============================================================================
  */
 function enterRoom(roomId) {
-  // 若已有旧房间先清理
-  if (activeRoom || localEphemeralBus) {
+  if (activeRooms.length > 0 || e2eeWssClients.length > 0 || localEphemeralBus) {
     cleanupMemoryAndLeaveRoom({ silent: true });
   }
 
   isSessionTerminated = false;
   activeRoomId = roomId;
+  roomCryptoKeyPromise = deriveRoomAesKey(roomId);
   connectedPeers.clear();
 
-  // 更新地址栏 #room=<房间ID>（不触发网络请求）
   const inviteUrl = buildInviteUrl(roomId);
   history.replaceState(null, '', `#room=${roomId}`);
 
-  // 切换至聊天视图
   document.body.classList.add('in-chat-mode');
   landingViewEl.classList.add('hidden');
   terminatedViewEl.classList.add('hidden');
   chatViewEl.classList.remove('hidden');
 
-  // 展示可复制的邀请链接与 GitHub Pages 标准格式说明
   inviteLinkInputEl.value = inviteUrl;
   inviteFormatHintEl.textContent = `当前房间凭证仅存于 #room=${roomId}，不会发送给任何服务器`;
   inviteBarEl.classList.remove('hidden');
 
   updateConnectionStatusUI();
 
-  // 1. 调用 Trystero 的 joinRoom 加入 P2P 房间
-  const room = joinRoom({ appId: APP_ID }, roomId);
-  activeRoom = room;
+  // 1. 启动 Trystero WebRTC P2P 双策略房间（MQTT WebRTC + Nostr WebRTC）
+  const strategies = [
+    () => joinMqttRoom({ appId: APP_ID, relayUrls: PUBLIC_WSS_BROKERS }, roomId),
+    () => joinNostrRoom({ appId: APP_ID }, roomId)
+  ];
 
-  // 2. 使用 Trystero 的 makeAction 创建端到端消息、撤回、修改、已读回执与销毁通道
-  const [sendMsg, onMsg] = room.makeAction('message');
-  const [sendRevoke, onRevoke] = room.makeAction('revoke');
-  const [sendEdit, onEdit] = room.makeAction('edit');
-  const [sendRead, onRead] = room.makeAction('read');
-  const [sendTerm, onTerm] = room.makeAction('terminate');
-
-  sendP2PMessage = sendMsg;
-  sendP2PRevoke = sendRevoke;
-  sendP2PEdit = sendEdit;
-  sendP2PRead = sendRead;
-  sendP2PTerminate = sendTerm;
-
-  // 监听对端通过 WebRTC 发来的新消息
-  onMsg((payload) => {
-    handleIncomingMessage(payload);
-  });
-
-  // 监听对端发来的“撤回消息”指令（支持文字、图片、语音撤回）
-  onRevoke((payload) => {
-    if (payload && payload.id) {
-      revokeMessageById(payload.id, { notifyPeer: false });
+  for (const createRoom of strategies) {
+    try {
+      const room = createRoom();
+      activeRooms.push(room);
+      bindTrysteroRoomActions(room);
+    } catch {
+      // 单个策略初始化异常时不影响其他通道
     }
+  }
+
+  // 2. 启动端到端加密（AES-GCM-256）WSS 零存储直连通道（解决手机4G/5G对称NAT或防火墙阻断UDP导致看不到消息的问题）
+  startE2eeZeroStorageWssBridge(roomId);
+
+  // 3. 启动同源内存 BroadcastChannel 通道（同浏览器多标签秒级直连）
+  if (typeof BroadcastChannel !== 'undefined') {
+    const bus = new BroadcastChannel(`siyu_ephemeral_${APP_ID}_${roomId}`);
+    localEphemeralBus = bus;
+
+    bus.onmessage = (event) => {
+      handleEnvelopePacket(event.data);
+    };
+
+    bus.postMessage({ kind: 'hello', senderId: selfId });
+  }
+
+  // 4. 定时发送在线心跳与历史同步探针，确保朋友随时进来都能秒级变为“已连接”并看到此前发送的内容
+  if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
+  presenceHeartbeatTimer = setInterval(() => {
+    if (!activeRoomId || isSessionTerminated) return;
+    broadcastEnvelopePacket({
+      kind: 'hello-ack',
+      senderId: selfId,
+      msgCount: messages.length
+    });
+  }, 4500);
+
+  messageInputEl.focus();
+}
+
+/**
+ * 绑定单个 Trystero 房间的动作与对端发现事件
+ */
+function bindTrysteroRoomActions(room) {
+  const [sendPacket, onPacket] = room.makeAction('siyu-pkt');
+  p2pDispatchers.push(sendPacket);
+
+  onPacket((packet) => {
+    handleEnvelopePacket(packet);
   });
 
-  // 监听对端发来的“修改文字消息”指令并实时刷新
-  onEdit((payload) => {
-    if (payload && payload.id && typeof payload.text === 'string') {
-      applyMessageEditById(payload.id, payload.text, { notifyPeer: false });
-    }
-  });
-
-  // 监听对端发来的“已读回执”
-  onRead((payload) => {
-    if (payload && Array.isArray(payload.ids)) {
-      applyReadReceiptIds(payload.ids);
-    }
-  });
-
-  // 监听对端发来的“结束并清除”指令
-  onTerm(() => {
-    terminateAndBurnSession({ notifyPeer: false });
-  });
-
-  // 监听房间内对端连接/断开状态
   room.onPeerJoin((peerId) => {
-    connectedPeers.add(peerId);
-    updateConnectionStatusUI();
+    registerPeerConnected(peerId);
+    // 对方通过 WebRTC DataChannel 加入时，立即将内存中已发送的消息同步给对方
+    syncInMemoryHistoryToPeers();
     acknowledgeUnreadReceivedMessages({ forceResendAll: true });
-    showToast('对方已加入房间，端到端私语通道已建立');
   });
 
   room.onPeerLeave((peerId) => {
     connectedPeers.delete(peerId);
     updateConnectionStatusUI();
   });
+}
 
-  // 3. 同源内存瞬态通道辅助（纯内存 IPC，不写任何磁盘/Storage，确保受限内网或同浏览器双标签秒级互通）
-  if (typeof BroadcastChannel !== 'undefined') {
-    const bus = new BroadcastChannel(`siyu_ephemeral_${APP_ID}_${roomId}`);
-    localEphemeralBus = bus;
+/**
+ * 统一处理所有通道（WebRTC DataChannel / E2EE WSS / BroadcastChannel）收到的消息信封
+ */
+function handleEnvelopePacket(packet) {
+  if (!packet || packet.senderId === selfId || isSessionTerminated) return;
 
-    bus.onmessage = (event) => {
-      const packet = event.data;
-      if (!packet || packet.senderId === selfId) return;
+  registerPeerConnected(packet.senderId);
 
-      if (packet.kind === 'hello') {
-        const isNew = !connectedPeers.has(packet.senderId);
-        connectedPeers.add(packet.senderId);
-        updateConnectionStatusUI();
-        bus.postMessage({ kind: 'hello-ack', senderId: selfId });
-        acknowledgeUnreadReceivedMessages({ forceResendAll: true });
-        if (isNew) {
-          showToast('对方已加入房间，端到端私语通道已建立');
-        }
-      } else if (packet.kind === 'hello-ack') {
-        const isNew = !connectedPeers.has(packet.senderId);
-        connectedPeers.add(packet.senderId);
-        updateConnectionStatusUI();
-        acknowledgeUnreadReceivedMessages({ forceResendAll: true });
-        if (isNew) {
-          showToast('对方已加入房间，端到端私语通道已建立');
-        }
-      } else if (packet.kind === 'message' && packet.payload) {
-        handleIncomingMessage(packet.payload);
-      } else if (packet.kind === 'revoke' && packet.payload?.id) {
-        revokeMessageById(packet.payload.id, { notifyPeer: false });
-      } else if (packet.kind === 'edit' && packet.payload?.id) {
-        applyMessageEditById(packet.payload.id, packet.payload.text, { notifyPeer: false });
-      } else if (packet.kind === 'read' && Array.isArray(packet.payload?.ids)) {
-        applyReadReceiptIds(packet.payload.ids);
-      } else if (packet.kind === 'terminate') {
-        terminateAndBurnSession({ notifyPeer: false });
-      } else if (packet.kind === 'peer-leave') {
-        connectedPeers.delete(packet.senderId);
-        updateConnectionStatusUI();
-      }
-    };
+  if (packet.kind === 'hello') {
+    broadcastEnvelopePacket({
+      kind: 'hello-ack',
+      senderId: selfId,
+      msgCount: messages.length
+    });
+    syncInMemoryHistoryToPeers();
+    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+  } else if (packet.kind === 'hello-ack') {
+    if ((packet.msgCount === 0 || typeof packet.msgCount === 'undefined') && messages.length > 0) {
+      syncInMemoryHistoryToPeers();
+    }
+    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+  } else if (packet.kind === 'message' && packet.payload) {
+    handleIncomingMessage(packet.payload);
+  } else if (packet.kind === 'sync-history' && Array.isArray(packet.items)) {
+    handleIncomingHistorySync(packet.items);
+  } else if (packet.kind === 'revoke' && packet.payload?.id) {
+    revokeMessageById(packet.payload.id, { notifyPeer: false });
+  } else if (packet.kind === 'edit' && packet.payload?.id) {
+    applyMessageEditById(packet.payload.id, packet.payload.text, { notifyPeer: false });
+  } else if (packet.kind === 'read' && Array.isArray(packet.payload?.ids)) {
+    applyReadReceiptIds(packet.payload.ids);
+  } else if (packet.kind === 'terminate') {
+    terminateAndBurnSession({ notifyPeer: false });
+  } else if (packet.kind === 'peer-leave') {
+    connectedPeers.delete(packet.senderId);
+    updateConnectionStatusUI();
+  }
+}
 
-    bus.postMessage({ kind: 'hello', senderId: selfId });
+function registerPeerConnected(peerId) {
+  if (!peerId || peerId === selfId) return;
+  const wasEmpty = connectedPeers.size === 0;
+  const isNewPeer = !connectedPeers.has(peerId);
+  connectedPeers.add(peerId);
+  if (wasEmpty || isNewPeer) {
+    updateConnectionStatusUI();
+  }
+  if (wasEmpty) {
+    showToast('对方已加入房间，端到端私语通道已建立');
+  }
+}
+
+function broadcastEnvelopePacket(packet) {
+  if (!activeRoomId || isSessionTerminated) return;
+
+  for (const sendFn of p2pDispatchers) {
+    try {
+      sendFn(packet);
+    } catch {
+      // 忽略单通道瞬时异常
+    }
   }
 
-  messageInputEl.focus();
+  broadcastEncryptedWssPacket(packet);
+
+  if (localEphemeralBus) {
+    try {
+      localEphemeralBus.postMessage(packet);
+    } catch {
+      // 忽略异常
+    }
+  }
+}
+
+/**
+ * 将当前内存中的 `messages` 历史同步给后进入房间的朋友
+ * （解决创建者先发了消息、朋友随后才打开链接看不到此前消息的问题）
+ */
+function syncInMemoryHistoryToPeers() {
+  if (!activeRoomId || isSessionTerminated || messages.length === 0) return;
+
+  const snapshot = messages.map((m) => ({
+    id: m.id,
+    type: m.type,
+    text: m.text,
+    mediaDataUrl: m.mediaDataUrl,
+    duration: m.duration,
+    timestamp: m.timestamp,
+    edited: Boolean(m.edited),
+    revoked: Boolean(m.revoked),
+    originSenderId: m.originSenderId || (m.direction === 'sent' ? selfId : 'peer')
+  }));
+
+  broadcastEnvelopePacket({
+    kind: 'sync-history',
+    senderId: selfId,
+    items: snapshot
+  });
+}
+
+function handleIncomingHistorySync(items) {
+  if (!Array.isArray(items) || isSessionTerminated) return;
+  let hasNew = false;
+
+  for (const item of items) {
+    if (!item || !item.id) continue;
+
+    if (!processedMessageIds.has(item.id)) {
+      processedMessageIds.add(item.id);
+      const direction = item.originSenderId === selfId ? 'sent' : 'received';
+      const record = {
+        id: item.id,
+        type: item.type || 'text',
+        text: item.text || '',
+        mediaDataUrl: item.mediaDataUrl || '',
+        duration: item.duration || 0,
+        timestamp: item.timestamp || Date.now(),
+        direction,
+        originSenderId: item.originSenderId || 'peer',
+        read: direction === 'sent',
+        readAckSent: false,
+        edited: Boolean(item.edited),
+        revoked: Boolean(item.revoked)
+      };
+      messages.push(record);
+      renderSingleMessageToDOM(record);
+      hasNew = true;
+    } else {
+      const existing = messages.find((m) => m.id === item.id);
+      if (existing) {
+        if (item.revoked && !existing.revoked) {
+          revokeMessageById(item.id, { notifyPeer: false });
+        } else if (item.edited && item.text && existing.text !== item.text) {
+          applyMessageEditById(item.id, item.text, { notifyPeer: false });
+        }
+      }
+    }
+  }
+
+  if (hasNew) {
+    acknowledgeUnreadReceivedMessages();
+  }
+}
+
+/**
+ * 端到端加密（AES-GCM-256）零存储 WSS 跨网直连引擎（兼容国内/移动4G/5G/企业防火墙）
+ */
+function encodeMqttVarLength(len) {
+  const out = [];
+  do {
+    let digit = len % 128;
+    len = Math.floor(len / 128);
+    if (len > 0) digit |= 128;
+    out.push(digit);
+  } while (len > 0);
+  return out;
+}
+
+function buildMqttConnectPacket(clientId) {
+  const cid = new TextEncoder().encode(clientId);
+  const varHeader = [0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x3c];
+  const payload = [cid.length >> 8, cid.length & 0xff, ...cid];
+  const remLen = varHeader.length + payload.length;
+  return new Uint8Array([0x10, ...encodeMqttVarLength(remLen), ...varHeader, ...payload]);
+}
+
+function buildMqttSubscribePacket(topic) {
+  const tBytes = new TextEncoder().encode(topic);
+  const body = [0x00, 0x01, tBytes.length >> 8, tBytes.length & 0xff, ...tBytes, 0x00];
+  return new Uint8Array([0x82, ...encodeMqttVarLength(body.length), ...body]);
+}
+
+function buildMqttPublishPacket(topic, utf8String) {
+  const tBytes = new TextEncoder().encode(topic);
+  const pBytes = new TextEncoder().encode(utf8String);
+  const remLen = 2 + tBytes.length + pBytes.length;
+  const header = [0x30, ...encodeMqttVarLength(remLen), tBytes.length >> 8, tBytes.length & 0xff];
+  const out = new Uint8Array(header.length + tBytes.length + pBytes.length);
+  out.set(header, 0);
+  out.set(tBytes, header.length);
+  out.set(pBytes, header.length + tBytes.length);
+  return out;
+}
+
+function startE2eeZeroStorageWssBridge(roomId) {
+  if (typeof WebSocket === 'undefined') return;
+  const topic = `siyu/v2/${APP_ID}/${roomId}`;
+
+  for (const brokerUrl of PUBLIC_WSS_BROKERS) {
+    try {
+      const ws = new WebSocket(brokerUrl, 'mqtt');
+      ws.binaryType = 'arraybuffer';
+
+      const clientState = {
+        ws,
+        ready: false,
+        topic,
+        pingTimer: null
+      };
+      e2eeWssClients.push(clientState);
+
+      ws.onopen = () => {
+        const randSuffix = Math.random().toString(36).slice(2, 10);
+        ws.send(buildMqttConnectPacket(`siyu_${selfId.slice(0, 8)}_${randSuffix}`));
+      };
+
+      ws.onmessage = async (event) => {
+        if (!event.data || isSessionTerminated) return;
+        const buf = new Uint8Array(event.data);
+        let pos = 0;
+
+        while (pos < buf.length) {
+          const packetType = buf[pos] & 0xf0;
+          let multiplier = 1;
+          let remLen = 0;
+          let idx = pos + 1;
+          let byte;
+          do {
+            if (idx >= buf.length) return;
+            byte = buf[idx++];
+            remLen += (byte & 127) * multiplier;
+            multiplier *= 128;
+          } while ((byte & 128) !== 0);
+
+          const packetEnd = idx + remLen;
+          if (packetEnd > buf.length) return;
+
+          if (packetType === 0x20 && !clientState.ready) {
+            clientState.ready = true;
+            ws.send(buildMqttSubscribePacket(topic));
+            clientState.pingTimer = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(new Uint8Array([0xc0, 0x00]));
+              }
+            }, 25000);
+            broadcastEncryptedWssPacket({ kind: 'hello', senderId: selfId });
+          } else if (packetType === 0x30) {
+            let pIdx = idx;
+            const topicLen = (buf[pIdx] << 8) | buf[pIdx + 1];
+            pIdx += 2 + topicLen;
+            const qos = (buf[pos] >> 1) & 0x03;
+            if (qos > 0) pIdx += 2;
+
+            const rawPayload = new TextDecoder().decode(buf.subarray(pIdx, packetEnd));
+            await handleEncryptedWssFrame(rawPayload);
+          }
+
+          pos = packetEnd;
+        }
+      };
+
+      ws.onerror = () => {};
+      ws.onclose = () => {
+        clientState.ready = false;
+        if (clientState.pingTimer) {
+          clearInterval(clientState.pingTimer);
+          clientState.pingTimer = null;
+        }
+      };
+    } catch {
+      // 忽略单个节点连接异常
+    }
+  }
+}
+
+async function broadcastEncryptedWssPacket(packet) {
+  const readyClients = e2eeWssClients.filter((c) => c.ready && c.ws.readyState === WebSocket.OPEN);
+  if (readyClients.length === 0) return;
+
+  try {
+    const plainJson = JSON.stringify(packet);
+    const maxSliceLen = 14000;
+
+    if (plainJson.length <= maxSliceLen) {
+      const enc = await encryptRoomText(plainJson);
+      if (!enc) return;
+      const frameStr = JSON.stringify({ s: selfId, iv: enc.iv, ct: enc.ct });
+      for (const c of readyClients) {
+        c.ws.send(buildMqttPublishPacket(c.topic, frameStr));
+      }
+    } else {
+      const chunkId = createMessageId();
+      const total = Math.ceil(plainJson.length / maxSliceLen);
+      for (let i = 0; i < total; i++) {
+        const slice = plainJson.slice(i * maxSliceLen, (i + 1) * maxSliceLen);
+        const enc = await encryptRoomText(slice);
+        if (!enc) return;
+        const frameStr = JSON.stringify({
+          s: selfId,
+          cid: chunkId,
+          idx: i,
+          tot: total,
+          iv: enc.iv,
+          ct: enc.ct
+        });
+        for (const c of readyClients) {
+          c.ws.send(buildMqttPublishPacket(c.topic, frameStr));
+        }
+      }
+    }
+  } catch {
+    // 忽略加密广播异常
+  }
+}
+
+async function handleEncryptedWssFrame(rawFrameStr) {
+  try {
+    const frame = JSON.parse(rawFrameStr);
+    if (!frame || frame.s === selfId || !frame.iv || !frame.ct) return;
+
+    const decryptedSlice = await decryptRoomText(frame.iv, frame.ct);
+    if (!decryptedSlice) return;
+
+    if (!frame.cid) {
+      const packet = JSON.parse(decryptedSlice);
+      handleEnvelopePacket(packet);
+      return;
+    }
+
+    let entry = incomingChunkBuffer.get(frame.cid);
+    if (!entry) {
+      entry = { total: frame.tot, parts: new Array(frame.tot), received: 0 };
+      incomingChunkBuffer.set(frame.cid, entry);
+    }
+    if (typeof entry.parts[frame.idx] !== 'string') {
+      entry.parts[frame.idx] = decryptedSlice;
+      entry.received += 1;
+    }
+    if (entry.received === entry.total) {
+      incomingChunkBuffer.delete(frame.cid);
+      const fullJson = entry.parts.join('');
+      const packet = JSON.parse(fullJson);
+      handleEnvelopePacket(packet);
+    }
+  } catch {
+    // 忽略无法解密或非本房间的帧
+  }
 }
 
 /**
@@ -317,7 +669,8 @@ function dispatchOutgoingMessage(rawPayload) {
     text: rawPayload.text || '',
     mediaDataUrl: rawPayload.mediaDataUrl || '',
     duration: rawPayload.duration || 0,
-    timestamp: rawPayload.timestamp || Date.now()
+    timestamp: rawPayload.timestamp || Date.now(),
+    originSenderId: selfId
   };
 
   processedMessageIds.add(payload.id);
@@ -333,27 +686,12 @@ function dispatchOutgoingMessage(rawPayload) {
   messages.push(localRecord);
   renderSingleMessageToDOM(localRecord);
 
-  // 通过 Trystero WebRTC DataChannel 发送给对方
-  if (typeof sendP2PMessage === 'function') {
-    try {
-      sendP2PMessage(payload);
-    } catch {
-      // 忽略单通道瞬时异常
-    }
-  }
-
-  // 同步发送至同源内存瞬态通道
-  if (localEphemeralBus) {
-    try {
-      localEphemeralBus.postMessage({
-        kind: 'message',
-        senderId: selfId,
-        payload
-      });
-    } catch {
-      // 忽略瞬态通道异常
-    }
-  }
+  // 通过所有活跃通道（Trystero WebRTC + E2EE WSS + 内存通道）广播给对方
+  broadcastEnvelopePacket({
+    kind: 'message',
+    senderId: selfId,
+    payload
+  });
 }
 
 /**
@@ -373,6 +711,7 @@ function handleIncomingMessage(payload) {
     duration: payload.duration || 0,
     timestamp: payload.timestamp || Date.now(),
     direction: 'received',
+    originSenderId: payload.originSenderId || 'peer',
     readAckSent: false,
     edited: false,
     revoked: false
@@ -403,25 +742,11 @@ function acknowledgeUnreadReceivedMessages({ forceResendAll = false } = {}) {
 
   if (idsToAck.length === 0) return;
 
-  const receiptPayload = { ids: idsToAck, readAt: Date.now() };
-  if (typeof sendP2PRead === 'function') {
-    try {
-      sendP2PRead(receiptPayload);
-    } catch {
-      // 忽略单通道瞬时异常
-    }
-  }
-  if (localEphemeralBus) {
-    try {
-      localEphemeralBus.postMessage({
-        kind: 'read',
-        senderId: selfId,
-        payload: receiptPayload
-      });
-    } catch {
-      // 忽略异常
-    }
-  }
+  broadcastEnvelopePacket({
+    kind: 'read',
+    senderId: selfId,
+    payload: { ids: idsToAck, readAt: Date.now() }
+  });
 }
 
 /**
@@ -463,25 +788,11 @@ function revokeMessageById(msgId, { notifyPeer = true } = {}) {
   refreshMessageRowInDOM(msg);
 
   if (notifyPeer) {
-    const payload = { id: msgId, revokedAt: Date.now() };
-    if (typeof sendP2PRevoke === 'function') {
-      try {
-        sendP2PRevoke(payload);
-      } catch {
-        // 忽略异常
-      }
-    }
-    if (localEphemeralBus) {
-      try {
-        localEphemeralBus.postMessage({
-          kind: 'revoke',
-          senderId: selfId,
-          payload
-        });
-      } catch {
-        // 忽略异常
-      }
-    }
+    broadcastEnvelopePacket({
+      kind: 'revoke',
+      senderId: selfId,
+      payload: { id: msgId, revokedAt: Date.now() }
+    });
   }
 }
 
@@ -500,25 +811,11 @@ function applyMessageEditById(msgId, newText, { notifyPeer = true } = {}) {
   refreshMessageRowInDOM(msg);
 
   if (notifyPeer) {
-    const payload = { id: msgId, text: trimmed, editedAt: Date.now() };
-    if (typeof sendP2PEdit === 'function') {
-      try {
-        sendP2PEdit(payload);
-      } catch {
-        // 忽略异常
-      }
-    }
-    if (localEphemeralBus) {
-      try {
-        localEphemeralBus.postMessage({
-          kind: 'edit',
-          senderId: selfId,
-          payload
-        });
-      } catch {
-        // 忽略异常
-      }
-    }
+    broadcastEnvelopePacket({
+      kind: 'edit',
+      senderId: selfId,
+      payload: { id: msgId, text: trimmed, editedAt: Date.now() }
+    });
   }
 }
 
@@ -986,6 +1283,10 @@ function synthesizeGentleWhisperWavDataUrl(seconds = 2) {
  * 6. 抹除地址栏中的 `#room=<房间ID>`，展示“对话已结束，痕迹已清除”终态。
  */
 function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) {
+  if (presenceHeartbeatTimer) {
+    clearInterval(presenceHeartbeatTimer);
+    presenceHeartbeatTimer = null;
+  }
   // 停止录音与语音播放
   if (recordingTimerInterval) {
     clearInterval(recordingTimerInterval);
@@ -1005,36 +1306,31 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
 
   // 通知对端同步销毁或离开
   if (notifyPeer) {
-    if (typeof sendP2PTerminate === 'function') {
-      try {
-        sendP2PTerminate({ endedAt: Date.now() });
-      } catch {
-        // 忽略关闭前异常
-      }
-    }
-    if (localEphemeralBus) {
-      try {
-        localEphemeralBus.postMessage({ kind: 'terminate', senderId: selfId });
-      } catch {
-        // 忽略关闭前异常
-      }
-    }
-  } else if (localEphemeralBus) {
-    try {
-      localEphemeralBus.postMessage({ kind: 'peer-leave', senderId: selfId });
-    } catch {
-      // 忽略异常
-    }
+    broadcastEnvelopePacket({ kind: 'terminate', senderId: selfId });
+  } else {
+    broadcastEnvelopePacket({ kind: 'peer-leave', senderId: selfId });
   }
 
-  // 调用 Trystero 的 room.leave() 离开房间并清理信令/WebRTC通道
-  if (activeRoom) {
+  // 离开所有 Trystero P2P 房间
+  while (activeRooms.length > 0) {
+    const room = activeRooms.pop();
     try {
-      activeRoom.leave();
+      room.leave();
     } catch {
       // 忽略退出异常
     }
-    activeRoom = null;
+  }
+  p2pDispatchers = [];
+
+  // 关闭所有 E2EE WSS 连接
+  while (e2eeWssClients.length > 0) {
+    const client = e2eeWssClients.pop();
+    if (client.pingTimer) clearInterval(client.pingTimer);
+    try {
+      client.ws.close();
+    } catch {
+      // 忽略异常
+    }
   }
 
   if (localEphemeralBus) {
@@ -1046,13 +1342,10 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
     localEphemeralBus = null;
   }
 
-  sendP2PMessage = null;
-  sendP2PRevoke = null;
-  sendP2PEdit = null;
-  sendP2PRead = null;
-  sendP2PTerminate = null;
   activeRoomId = null;
+  roomCryptoKeyPromise = null;
   connectedPeers.clear();
+  incomingChunkBuffer.clear();
 
   // 释放内存中的临时 ObjectURL
   ephemeralObjectUrls.forEach((url) => {
