@@ -5,45 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 阅后即焚点对点临时私密聊天</title>
-  <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BAJm0sfn.svg" />
-  <script type="module" crossorigin src="/siyu/assets/index-DswdO9px.js"></script>
-  <link rel="stylesheet" crossorigin href="/siyu/assets/index-CceQYd7G.css">
+  <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BoxwIc6u.svg" />
+  <script type="module" crossorigin src="/siyu/assets/index-resMLkMa.js"></script>
+  <link rel="stylesheet" crossorigin href="/siyu/assets/index-Ch2CwUrS.css">
 </head>
 <body>
-  <!-- 全屏意境背景层：苍茫雪原与浓雾中的双人秋千 -->
+  <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
   <div class="ambient-backdrop" aria-hidden="true">
-    <div class="ambient-photo"></div>
     <div class="ambient-mist"></div>
   </div>
 
   <main class="app-shell">
-    <!-- ==================== 1. 网站首页（未进入房间时展示） ==================== -->
+    <!-- ==================== 1. 网站首页（极简三段式相框装裱构图） ==================== -->
     <section id="landing-view" class="view-panel landing-panel" aria-label="私语首页">
       <div class="landing-card">
-        <div class="brand-header">
-          <!-- 私语专属极简小 Logo（双人秋千 + 耳语声波印章） -->
-          <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='inkGrad'%20x1='0'%20y1='0'%20x2='64'%20y2='64'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20offset='0%25'%20stop-color='%231a1a1a'/%3e%3cstop%20offset='100%25'%20stop-color='%233a3a3a'/%3e%3c/linearGradient%3e%3clinearGradient%20id='mistGrad'%20x1='0'%20y1='0'%20x2='0'%20y2='64'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20offset='0%25'%20stop-color='%23f7f7f7'/%3e%3cstop%20offset='100%25'%20stop-color='%23e3e3e3'/%3e%3c/linearGradient%3e%3c/defs%3e%3c!--%20极简雾白底印章%20--%3e%3crect%20x='3'%20y='3'%20width='58'%20height='58'%20rx='16'%20fill='url(%23mistGrad)'%20stroke='%232b2b2b'%20stroke-width='1.6'/%3e%3c!--%20顶部耳语声波暗纹%20--%3e%3cpath%20d='M23%2013.5C28.5%2010.5%2035.5%2010.5%2041%2013.5'%20stroke='%237a7a7a'%20stroke-width='1.3'%20stroke-linecap='round'%20stroke-dasharray='1.5%202.5'/%3e%3c!--%20秋千横梁与支架%20--%3e%3cline%20x1='17'%20y1='18'%20x2='47'%20y2='18'%20stroke='url(%23inkGrad)'%20stroke-width='2.4'%20stroke-linecap='round'/%3e%3cline%20x1='20'%20y1='18'%20x2='15.5'%20y2='49'%20stroke='url(%23inkGrad)'%20stroke-width='1.6'%20stroke-linecap='round'/%3e%3cline%20x1='44'%20y1='18'%20x2='48.5'%20y2='49'%20stroke='url(%23inkGrad)'%20stroke-width='1.6'%20stroke-linecap='round'/%3e%3c!--%20秋千吊绳与座板%20--%3e%3cline%20x1='24'%20y1='18'%20x2='24'%20y2='39'%20stroke='%23333333'%20stroke-width='1.2'/%3e%3cline%20x1='40'%20y1='18'%20x2='40'%20y2='39'%20stroke='%23333333'%20stroke-width='1.2'/%3e%3cline%20x1='22'%20y1='39.5'%20x2='42'%20y2='39.5'%20stroke='%23181818'%20stroke-width='2.2'%20stroke-linecap='round'/%3e%3c!--%20并肩私语双人剪影（左深墨、右浅灰，微微相倾）%20--%3e%3ccircle%20cx='28.8'%20cy='28'%20r='2.7'%20fill='%231f1f1f'/%3e%3cpath%20d='M24.8%2038.8C24.8%2033.8%2026.6%2031.3%2029.3%2031.3C31.5%2031.3%2032.3%2033.4%2032.3%2038.8Z'%20fill='%23232323'/%3e%3ccircle%20cx='35.3'%20cy='28.4'%20r='2.6'%20fill='%236f6f6f'/%3e%3cpath%20d='M32.1%2038.8C32.1%2034%2033.4%2031.6%2035.6%2031.6C37.9%2031.6%2039.2%2034%2039.2%2038.8Z'%20fill='%23686868'/%3e%3c!--%20悬垂双腿剪影%20--%3e%3cline%20x1='34.5'%20y1='40.2'%20x2='34.3'%20y2='45.5'%20stroke='%23222222'%20stroke-width='1.4'%20stroke-linecap='round'/%3e%3cline%20x1='36.8'%20y1='40.2'%20x2='37.0'%20y2='45.5'%20stroke='%23222222'%20stroke-width='1.4'%20stroke-linecap='round'/%3e%3c!--%20雪地极简微波%20--%3e%3cpath%20d='M12%2050.5Q32%2048.5%2052%2050.5'%20stroke='%239e9e9e'%20stroke-width='1.1'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语 Logo" class="brand-logo-lg" width="56" height="56" />
-          <div class="brand-title-group">
-            <h1 class="brand-title">私语</h1>
-            <p class="brand-subtitle">天地茫茫，唯你我耳语 · 打开即聊，聊完即焚</p>
+        <!-- 顶部：L1 折页耳语图标 + 私语 + S3 Slogan（无外框极简居中） -->
+        <header class="brand-header">
+          <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3c!--%20方案%20L1：折页耳语（中国风对撞色%20%23494266%20黛紫%20×%20%23E9E8EF%20云水灰白）%20--%3e%3crect%20x='4'%20y='4'%20width='56'%20height='56'%20rx='15'%20fill='%23E9E8EF'%20stroke='%23494266'%20stroke-width='1.8'/%3e%3c!--%20左折页与右折页（构成的立体半掩报页）%20--%3e%3cpath%20d='M16%2020L32%2016V45L16%2049V20Z'%20fill='%23DFDDE9'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3cpath%20d='M48%2020L32%2016V45L48%2049V20Z'%20fill='%23F4F3F8'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3c!--%20报页后方微微探出的双人私语圆点%20--%3e%3ccircle%20cx='27.5'%20cy='31.5'%20r='2.3'%20fill='%23494266'/%3e%3ccircle%20cx='36.5'%20cy='31.5'%20r='2.3'%20fill='%237B7399'/%3e%3c!--%20顶部一缕消散于风中的轻音弧线%20--%3e%3cpath%20d='M25%2011.5C29.5%209.2%2034.5%209.2%2039%2011.5'%20stroke='%236E668C'%20stroke-width='1.5'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语 Logo" class="brand-logo-lg" width="48" height="48" />
+          <h1 class="brand-title">私语</h1>
+          <p class="brand-subtitle">有些话不必惊动世界，读完便融进风里。</p>
+        </header>
+
+        <!-- 中央：画廊装裱相框 + 图2旧报长椅私语画芯 -->
+        <div class="gallery-frame">
+          <div class="gallery-artwork-wrap">
+            <img src="/siyu/assets/hero-couple-Chg9B1Vs.jpg" alt="长椅旧报私语" class="gallery-artwork-img" />
           </div>
         </div>
 
-        <div class="privacy-pillars" role="list" aria-label="隐私保障原则">
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>WebRTC 点对点加密直连，不经任何应用服务器</span>
-          </div>
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>纯内存驻留（<code>let messages = []</code>），零本地存储写入</span>
-          </div>
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>点击结束或关闭页面即刻双向清空，旧链接随即作废</span>
-          </div>
-        </div>
-
+        <!-- 底部：黛紫对撞色开启按钮 -->
         <div class="landing-actions">
           <button id="start-whisper-btn" type="button" class="primary-whisper-btn">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -53,10 +43,6 @@
             <span>点击我，开始私语吧</span>
           </button>
         </div>
-
-        <p class="landing-footnote">
-          房间凭证仅存于 URL 的 <code>#room=</code> 片段中，按 HTTP 规范绝不会发送至任何服务端
-        </p>
       </div>
     </section>
 
@@ -65,7 +51,7 @@
       <!-- 顶部固定栏：Logo + 房间状态指示 + 显眼的“结束并清除”按钮 -->
       <header class="chat-topbar">
         <div class="topbar-left">
-          <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='inkGrad'%20x1='0'%20y1='0'%20x2='64'%20y2='64'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20offset='0%25'%20stop-color='%231a1a1a'/%3e%3cstop%20offset='100%25'%20stop-color='%233a3a3a'/%3e%3c/linearGradient%3e%3clinearGradient%20id='mistGrad'%20x1='0'%20y1='0'%20x2='0'%20y2='64'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20offset='0%25'%20stop-color='%23f7f7f7'/%3e%3cstop%20offset='100%25'%20stop-color='%23e3e3e3'/%3e%3c/linearGradient%3e%3c/defs%3e%3c!--%20极简雾白底印章%20--%3e%3crect%20x='3'%20y='3'%20width='58'%20height='58'%20rx='16'%20fill='url(%23mistGrad)'%20stroke='%232b2b2b'%20stroke-width='1.6'/%3e%3c!--%20顶部耳语声波暗纹%20--%3e%3cpath%20d='M23%2013.5C28.5%2010.5%2035.5%2010.5%2041%2013.5'%20stroke='%237a7a7a'%20stroke-width='1.3'%20stroke-linecap='round'%20stroke-dasharray='1.5%202.5'/%3e%3c!--%20秋千横梁与支架%20--%3e%3cline%20x1='17'%20y1='18'%20x2='47'%20y2='18'%20stroke='url(%23inkGrad)'%20stroke-width='2.4'%20stroke-linecap='round'/%3e%3cline%20x1='20'%20y1='18'%20x2='15.5'%20y2='49'%20stroke='url(%23inkGrad)'%20stroke-width='1.6'%20stroke-linecap='round'/%3e%3cline%20x1='44'%20y1='18'%20x2='48.5'%20y2='49'%20stroke='url(%23inkGrad)'%20stroke-width='1.6'%20stroke-linecap='round'/%3e%3c!--%20秋千吊绳与座板%20--%3e%3cline%20x1='24'%20y1='18'%20x2='24'%20y2='39'%20stroke='%23333333'%20stroke-width='1.2'/%3e%3cline%20x1='40'%20y1='18'%20x2='40'%20y2='39'%20stroke='%23333333'%20stroke-width='1.2'/%3e%3cline%20x1='22'%20y1='39.5'%20x2='42'%20y2='39.5'%20stroke='%23181818'%20stroke-width='2.2'%20stroke-linecap='round'/%3e%3c!--%20并肩私语双人剪影（左深墨、右浅灰，微微相倾）%20--%3e%3ccircle%20cx='28.8'%20cy='28'%20r='2.7'%20fill='%231f1f1f'/%3e%3cpath%20d='M24.8%2038.8C24.8%2033.8%2026.6%2031.3%2029.3%2031.3C31.5%2031.3%2032.3%2033.4%2032.3%2038.8Z'%20fill='%23232323'/%3e%3ccircle%20cx='35.3'%20cy='28.4'%20r='2.6'%20fill='%236f6f6f'/%3e%3cpath%20d='M32.1%2038.8C32.1%2034%2033.4%2031.6%2035.6%2031.6C37.9%2031.6%2039.2%2034%2039.2%2038.8Z'%20fill='%23686868'/%3e%3c!--%20悬垂双腿剪影%20--%3e%3cline%20x1='34.5'%20y1='40.2'%20x2='34.3'%20y2='45.5'%20stroke='%23222222'%20stroke-width='1.4'%20stroke-linecap='round'/%3e%3cline%20x1='36.8'%20y1='40.2'%20x2='37.0'%20y2='45.5'%20stroke='%23222222'%20stroke-width='1.4'%20stroke-linecap='round'/%3e%3c!--%20雪地极简微波%20--%3e%3cpath%20d='M12%2050.5Q32%2048.5%2052%2050.5'%20stroke='%239e9e9e'%20stroke-width='1.1'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语" class="brand-logo-sm" width="30" height="30" />
+          <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3c!--%20方案%20L1：折页耳语（中国风对撞色%20%23494266%20黛紫%20×%20%23E9E8EF%20云水灰白）%20--%3e%3crect%20x='4'%20y='4'%20width='56'%20height='56'%20rx='15'%20fill='%23E9E8EF'%20stroke='%23494266'%20stroke-width='1.8'/%3e%3c!--%20左折页与右折页（构成的立体半掩报页）%20--%3e%3cpath%20d='M16%2020L32%2016V45L16%2049V20Z'%20fill='%23DFDDE9'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3cpath%20d='M48%2020L32%2016V45L48%2049V20Z'%20fill='%23F4F3F8'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3c!--%20报页后方微微探出的双人私语圆点%20--%3e%3ccircle%20cx='27.5'%20cy='31.5'%20r='2.3'%20fill='%23494266'/%3e%3ccircle%20cx='36.5'%20cy='31.5'%20r='2.3'%20fill='%237B7399'/%3e%3c!--%20顶部一缕消散于风中的轻音弧线%20--%3e%3cpath%20d='M25%2011.5C29.5%209.2%2034.5%209.2%2039%2011.5'%20stroke='%236E668C'%20stroke-width='1.5'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语" class="brand-logo-sm" width="30" height="30" />
           <span class="topbar-brand">私语</span>
           <span class="topbar-divider" aria-hidden="true"></span>
           <div id="connection-badge" class="status-badge status-waiting" role="status" aria-live="polite">
@@ -106,11 +92,11 @@
         </div>
       </div>
 
-      <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音） -->
+      <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
       <div id="message-list" class="message-list" role="log" aria-live="polite">
         <div id="empty-chat-hint" class="empty-chat-hint">
           <p>消息仅驻留于当前内存，支持发送文字、图片与语音</p>
-          <p class="empty-sub">无头像 · 无昵称 · 关闭或点击“结束并清除”即刻双端销毁</p>
+          <p class="empty-sub">支持已读/未读状态、消息撤回、文字修改重刷 · 点击“结束并清除”即刻双端销毁</p>
         </div>
       </div>
 
