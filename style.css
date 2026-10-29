@@ -745,6 +745,17 @@ body {
   border-radius: 999px;
 }
 
+.live-call-hd-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #181524;
+  background: linear-gradient(90deg, #e5d8b8 0%, #f5ecd7 100%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(229, 216, 184, 0.25);
+}
+
 .live-call-controls {
   display: inline-flex;
   align-items: center;
@@ -886,86 +897,27 @@ body {
   border-radius: 99px;
 }
 
-/* 屏幕共享或视频通话激活时关闭毛玻璃 backdrop-filter，根治 Chromium/Edge 显卡硬件加速下的绿屏渲染故障 */
-body.is-screen-sharing .chat-panel,
-body.is-screen-sharing .chat-topbar,
-body.is-screen-sharing .chat-composer {
+/* 视频超清锐化与色彩增强引擎（结合 SVG feConvolveMatrix 卷积锐化 + 对比度/微饱和度优化） */
+.hd-video-enhanced {
+  filter: url(#siyu-hd-sharpen) contrast(1.06) saturate(1.08) brightness(1.02);
+  image-rendering: high-quality;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.call-local-video.hd-video-enhanced {
+  transform: scaleX(-1) translateZ(0);
+}
+
+/* 视频通话激活时关闭外层毛玻璃 backdrop-filter，保障显卡硬件加速纯净渲染 */
+body.is-video-active .chat-panel,
+body.is-video-active .chat-topbar,
+body.is-video-active .chat-composer {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   background: #F6F5FB;
 }
 
-/* 一起看 / 屏幕共享放映区 */
-.cinema-stage {
-  width: 100%;
-  background: #181524;
-  border-bottom: 1px solid var(--card-border);
-  padding: 10px 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* 影院级全屏状态（兼容原生 Fullscreen API 与页内全屏兜底） */
-.cinema-stage:fullscreen,
-.cinema-stage:-webkit-full-screen,
-.cinema-stage.is-theater-fullscreen {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  max-width: none !important;
-  max-height: none !important;
-  z-index: 9999 !important;
-  background: #0b0a10 !important;
-  padding: 14px 24px 20px !important;
-  border: none !important;
-  display: flex !important;
-  flex-direction: column !important;
-  justify-content: space-between !important;
-}
-
-.cinema-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-.cinema-title-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cinema-title {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--brand-mist);
-  letter-spacing: 0.04em;
-}
-
-.cinema-audio-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: #d6d3e6;
-  background: rgba(233, 232, 239, 0.12);
-  border: 1px solid rgba(233, 232, 239, 0.22);
-}
-
-.cinema-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.cinema-mic-btn,
 .cinema-ctrl-btn {
   padding: 4px 10px;
   font-size: 11.5px;
@@ -977,12 +929,11 @@ body.is-screen-sharing .chat-composer {
   transition: background 0.15s ease;
 }
 
-.cinema-mic-btn:hover,
 .cinema-ctrl-btn:hover {
   background: rgba(233, 232, 239, 0.24);
 }
 
-.cinema-mic-btn.is-active {
+.cinema-ctrl-btn.is-active {
   background: #257a58;
   border-color: rgba(255, 255, 255, 0.35);
   color: #ffffff;
@@ -996,45 +947,6 @@ body.is-screen-sharing .chat-composer {
   border: none;
   border-radius: 999px;
   cursor: pointer;
-}
-
-.cinema-viewport {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  flex: 1;
-  min-height: 0;
-}
-
-.sharer-mirror-guard {
-  width: 100%;
-  padding: 14px 16px;
-  border-radius: 10px;
-  background: rgba(233, 232, 239, 0.07);
-  border: 1px dashed rgba(233, 232, 239, 0.22);
-  color: #cbc7dc;
-  font-size: 12px;
-  text-align: center;
-}
-
-.shared-screen-video {
-  width: 100%;
-  max-height: 250px;
-  border-radius: 10px;
-  background: #0b0a10;
-  object-fit: contain;
-}
-
-.cinema-stage:fullscreen .shared-screen-video,
-.cinema-stage:-webkit-full-screen .shared-screen-video,
-.cinema-stage.is-theater-fullscreen .shared-screen-video {
-  width: 100% !important;
-  height: calc(100vh - 70px) !important;
-  max-height: none !important;
-  border-radius: 8px;
-  object-fit: contain !important;
 }
 
 /* ==================== 消息列表区域（#494266 × #E9E8EF 对撞气泡 + 撤回/修改/已读） ==================== */
@@ -1318,8 +1230,9 @@ body.is-screen-sharing .chat-composer {
   border-radius: 999px;
 }
 
-/* 图片消息气泡 */
-.msg-bubble.msg-type-image {
+/* 图片与高清视频消息气泡 */
+.msg-bubble.msg-type-image,
+.msg-bubble.msg-type-video {
   padding: 5px;
   overflow: hidden;
 }
@@ -1333,6 +1246,38 @@ body.is-screen-sharing .chat-composer {
   border-radius: 12px;
   cursor: zoom-in;
   object-fit: cover;
+}
+
+.msg-video-wrap {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #14111f;
+}
+
+.msg-video {
+  display: block;
+  max-width: 280px;
+  max-height: 240px;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #14111f;
+  object-fit: contain;
+}
+
+.msg-video-hd-tag {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #181524;
+  background: rgba(245, 236, 215, 0.92);
+  padding: 1.5px 6px;
+  border-radius: 99px;
+  pointer-events: none;
 }
 
 /* 语音消息气泡 */

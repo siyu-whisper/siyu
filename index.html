@@ -158,20 +158,24 @@
         </div>
       </div>
 
-      <!-- 实时语音与视频对话主舞台（支持纯语音声波对话、双人视频画中画、静音、开关摄像头、全屏与挂断） -->
+      <!-- 实时语音与高清视频对话主舞台（支持纯语音声波对话、1080P/720P高清双人视频画中画、静音、开关摄像头、全屏与挂断） -->
       <div id="live-call-stage" class="live-call-stage hidden">
         <div class="live-call-header">
           <div class="live-call-title-group">
             <span class="live-call-dot"></span>
             <span id="live-call-status-text" class="live-call-title">实时语音通话中</span>
             <span id="live-call-timer" class="live-call-timer">00:00</span>
+            <span id="live-call-hd-badge" class="live-call-hd-badge hidden">HD 1080P 增强</span>
           </div>
           <div class="live-call-controls">
             <button id="call-toggle-mic-btn" type="button" class="cinema-ctrl-btn" title="静音或取消静音麦克风">
               🎙️ 麦克风: 开
             </button>
-            <button id="call-toggle-cam-btn" type="button" class="cinema-ctrl-btn" title="开启或关闭摄像头视频画面">
+            <button id="call-toggle-cam-btn" type="button" class="cinema-ctrl-btn" title="开启或关闭高清摄像头视频画面">
               📷 摄像头: 关
+            </button>
+            <button id="call-toggle-hd-btn" type="button" class="cinema-ctrl-btn is-active hidden" title="开启或关闭实时视频高清锐化与画质增强引擎">
+              ✨ 超清增强: 开
             </button>
             <button id="call-fullscreen-btn" type="button" class="cinema-ctrl-btn" title="全屏切换">
               ⛶ 全屏
@@ -198,13 +202,29 @@
             </div>
           </div>
 
-          <!-- 视频通话画中画视图 -->
+          <!-- 高清视频通话画中画视图（内置 SVG 卷积锐化滤镜 #siyu-hd-sharpen） -->
           <div id="call-video-grid-view" class="call-video-grid-view hidden">
-            <video id="call-remote-video" class="call-remote-video" autoplay playsinline></video>
-            <img id="call-remote-fallback-img" class="call-remote-video hidden" alt="对方视频画面" />
+            <svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true">
+              <defs>
+                <filter id="siyu-hd-sharpen" color-interpolation-filters="sRGB">
+                  <feConvolveMatrix
+                    order="3 3"
+                    preserveAlpha="true"
+                    kernelMatrix="0 -0.35 0 -0.35 2.4 -0.35 0 -0.35 0"
+                  />
+                  <feComponentTransfer>
+                    <feFuncR type="linear" slope="1.04" intercept="-0.015"/>
+                    <feFuncG type="linear" slope="1.04" intercept="-0.015"/>
+                    <feFuncB type="linear" slope="1.04" intercept="-0.015"/>
+                  </feComponentTransfer>
+                </filter>
+              </defs>
+            </svg>
+            <video id="call-remote-video" class="call-remote-video hd-video-enhanced" autoplay playsinline></video>
+            <img id="call-remote-fallback-img" class="call-remote-video hd-video-enhanced hidden" alt="对方高清视频画面" />
             <div class="call-local-pip-wrap">
-              <video id="call-local-video" class="call-local-video" autoplay playsinline muted></video>
-              <span class="call-pip-tag">我</span>
+              <video id="call-local-video" class="call-local-video hd-video-enhanced" autoplay playsinline muted></video>
+              <span class="call-pip-tag">我 · HD</span>
             </div>
           </div>
 
@@ -213,47 +233,16 @@
         </div>
       </div>
 
-      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，默认隔绝麦克风人声、仅传电脑原声，支持一键开关人声混音与纯净全屏） -->
-      <div id="cinema-stage" class="cinema-stage hidden">
-        <div class="cinema-header">
-          <div class="cinema-title-group">
-            <span id="cinema-title" class="cinema-title">正在共享屏幕 · 同步放映中</span>
-            <span id="cinema-audio-badge" class="cinema-audio-badge">仅电脑原声（人声已隔绝）</span>
-          </div>
-          <div class="cinema-controls">
-            <button id="toggle-local-preview-btn" type="button" class="cinema-ctrl-btn hidden" title="共享整个桌面时默认折叠本机画面以防止无限镜面重影">
-              👁️ 展开本机预览
-            </button>
-            <button id="toggle-share-mic-btn" type="button" class="cinema-mic-btn hidden" title="切换是否将你的麦克风说话人声混入屏幕共享">
-              🎙️ 混入人声: 关
-            </button>
-            <button id="toggle-cinema-fullscreen-btn" type="button" class="cinema-ctrl-btn" title="进入或退出全屏影院模式">
-              ⛶ 全屏观看
-            </button>
-            <button id="stop-screen-share-btn" type="button" class="cinema-stop-btn hidden">
-              停止共享
-            </button>
-          </div>
-        </div>
-        <div id="cinema-viewport" class="cinema-viewport">
-          <div id="sharer-mirror-guard" class="sharer-mirror-guard hidden">
-            <span>正在向对方实时传输高清画面（已默认隐藏本机镜面，避免桌面无限重影与绿屏）</span>
-          </div>
-          <video id="shared-screen-video" class="shared-screen-video" autoplay playsinline controls controlsList="nofullscreen"></video>
-          <img id="shared-screen-fallback-img" class="shared-screen-video hidden" alt="屏幕共享同步画面" />
-        </div>
-      </div>
-
-      <!-- 极简消息列表区域（区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
+      <!-- 极简消息列表区域（区分自己/对方，支持文字、图片、语音、音视频连麦、撤回、文字编辑与已读回执） -->
       <div id="message-list" class="message-list" role="log" aria-live="polite">
         <div id="empty-chat-hint" class="empty-chat-hint">
           <div class="empty-ornament" aria-hidden="true">❖</div>
           <p class="empty-main-text">方寸私语，仅驻此刻内存</p>
-          <p class="empty-sub">支持文字、图片、语音短讯、实时音视频通话与屏幕同看 · 任一人结束即全员焚毁</p>
+          <p class="empty-sub">支持文字、图片、语音短讯、高清视频短片与实时音视频通话 · 任一人结束即全员焚毁</p>
         </div>
       </div>
 
-      <!-- 底部悬浮坞式输入区（支持语音短讯、图片、实时语音通话、视频连麦、屏幕同看、文字输入） -->
+      <!-- 底部悬浮坞式输入区（仅保留：语音短讯、图片、高清视频文件、实时语音通话、高清视频连麦、文字输入） -->
       <footer class="chat-composer">
         <!-- 常规输入栏 -->
         <div id="composer-normal-row" class="composer-row">
@@ -276,6 +265,15 @@
             </button>
             <input id="image-file-input" type="file" accept="image/*" class="hidden" />
 
+            <!-- 发送高清视频短片文件按钮 -->
+            <button id="video-pick-btn" type="button" class="tool-btn" title="发送高清视频短片文件" aria-label="发送视频">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="4" width="20" height="16" rx="3"/>
+                <polygon points="10,8.5 16,12 10,15.5" fill="currentColor" stroke="none"/>
+              </svg>
+            </button>
+            <input id="video-file-input" type="file" accept="video/*" class="hidden" />
+
             <!-- 实时语音通话按钮 -->
             <button id="voice-call-btn" type="button" class="tool-btn" title="发起实时语音通话" aria-label="实时语音通话">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -283,20 +281,11 @@
               </svg>
             </button>
 
-            <!-- 实时视频连麦按钮 -->
-            <button id="video-call-btn" type="button" class="tool-btn" title="发起实时视频连麦" aria-label="实时视频连麦">
+            <!-- 实时高清视频连麦按钮 -->
+            <button id="video-call-btn" type="button" class="tool-btn" title="发起 1080P/720P 实时高清视频连麦" aria-label="实时视频连麦">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <rect x="2" y="5" width="14" height="14" rx="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 <polygon points="22 7 16 12 22 17 22 7" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-
-            <!-- 共享屏幕/一起看电影按钮 -->
-            <button id="screen-share-btn" type="button" class="tool-btn" title="分享屏幕或浏览器标签页（支持同步看电影/视频）" aria-label="共享屏幕一起看">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                <rect x="2" y="3" width="20" height="14" rx="2.5"/>
-                <path d="M8 21h8M12 17v4" stroke-linecap="round"/>
-                <polygon points="10,7.5 15.5,10 10,12.5" fill="currentColor" stroke="none"/>
               </svg>
             </button>
           </div>
