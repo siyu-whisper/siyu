@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="referrer" content="no-referrer" />
-  <title>私语 · 阅后即焚点对点临时私密聊天</title>
+  <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="./logo.svg" />
   <link rel="stylesheet" href="./style.css" />
   <script type="importmap">
@@ -167,22 +167,30 @@
       </footer>
     </section>
 
-    <!-- ==================== 3. 结束并清除后的终态视图 ==================== -->
-    <section id="terminated-view" class="view-panel terminated-panel hidden" aria-label="对话已结束终态">
-      <div class="terminated-card">
-        <div class="terminated-icon-wrap" aria-hidden="true">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="24" cy="24" r="19" stroke-dasharray="3 3"/>
-            <path d="M16 24.5l5.5 5.5L33 18.5" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"/>
-          </svg>
+    <!-- ==================== 3. 结束并清除后的终态视图（与首页对称的极简三段式画框构图） ==================== -->
+    <section id="terminated-view" class="view-panel landing-panel terminated-panel hidden" aria-label="对话已结束终态">
+      <div class="landing-card">
+        <header class="brand-header">
+          <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="48" height="48" />
+          <h2 id="terminated-title" class="brand-title">私语</h2>
+          <p id="terminated-desc" class="brand-subtitle">话已燃尽，一切随风去吧。</p>
+        </header>
+
+        <div class="gallery-frame">
+          <div class="gallery-artwork-wrap">
+            <img src="./end-burn.jpg" alt="话已燃尽，随风而去" class="gallery-artwork-img" />
+          </div>
         </div>
-        <h2 id="terminated-title" class="terminated-title">对话已结束，痕迹已清除</h2>
-        <p id="terminated-desc" class="terminated-desc">
-          内存中的消息数组、DOM 节点及媒体对象均已彻底清空，P2P 房间已断开。此前分享的邀请链接已失效，即使再次打开也只会进入全新的空房间。
-        </p>
-        <button id="back-home-btn" type="button" class="secondary-home-btn">
-          返回首页，重新开始私语
-        </button>
+
+        <div class="landing-actions">
+          <button id="back-home-btn" type="button" class="primary-whisper-btn">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 3v5h5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>重新开始私语</span>
+          </button>
+        </div>
       </div>
     </section>
   </main>

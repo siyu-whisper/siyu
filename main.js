@@ -883,39 +883,70 @@ function populateMessageRowElement(rowEl, msg) {
 
   rowEl.appendChild(bubbleEl);
 
-  // 气泡下方元信息栏（已读/未读、已修改标记、文字修改按钮、撤回按钮）
+  // 气泡下方精致微图标工具栏（已读/未读双勾图标、已修改微图标、文字修改笔形图标、撤回弧形箭头图标）
   const metaBarEl = document.createElement('div');
   metaBarEl.className = 'msg-footer-meta';
 
   if (msg.edited) {
     const editedTag = document.createElement('span');
     editedTag.className = 'msg-edited-tag';
-    editedTag.textContent = '已修改';
+    editedTag.title = '该私语已修改';
+    editedTag.setAttribute('aria-label', '已修改');
+    editedTag.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 20h9" stroke-linecap="round"/>
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
     metaBarEl.appendChild(editedTag);
   }
 
   if (msg.direction === 'sent') {
-    // 1. 已读 / 未读状态徽标
+    // 1. 已读 / 未读小图标徽标（未读：单勾图标；已读：双勾高亮图标）
     const readBadge = document.createElement('span');
     readBadge.className = `msg-read-badge ${msg.read ? 'is-read' : 'is-unread'}`;
-    readBadge.textContent = msg.read ? '已读' : '未读';
+    readBadge.title = msg.read ? '已读' : '未读';
+    readBadge.setAttribute('aria-label', msg.read ? '已读' : '未读');
+    readBadge.dataset.readState = msg.read ? 'read' : 'unread';
+    readBadge.innerHTML = msg.read
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+           <path d="M2 12.5l4.2 4.2L15.5 7.5" stroke-linecap="round" stroke-linejoin="round"/>
+           <path d="M8.5 12.5l4.2 4.2L22 7.5" stroke-linecap="round" stroke-linejoin="round"/>
+         </svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+           <path d="M5 12.5l4.5 4.5L19 7.5" stroke-linecap="round" stroke-linejoin="round"/>
+         </svg>`;
     metaBarEl.appendChild(readBadge);
 
-    // 2. 文字消息专属“修改”按钮
+    // 2. 文字消息专属“修改”小图标按钮
     if (msg.type === 'text') {
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
       editBtn.className = 'msg-action-btn msg-edit-btn';
-      editBtn.textContent = '修改';
+      editBtn.title = '修改文字';
+      editBtn.setAttribute('aria-label', '修改');
+      editBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      `;
       editBtn.addEventListener('click', () => openInlineTextEditor(rowEl, bubbleEl, msg));
       metaBarEl.appendChild(editBtn);
     }
 
-    // 3. 所有已发送消息（文字、图片、语音）均支持“撤回”按钮
+    // 3. 所有已发送消息（文字、图片、语音）均支持“撤回”小图标按钮
     const revokeBtn = document.createElement('button');
     revokeBtn.type = 'button';
     revokeBtn.className = 'msg-action-btn msg-revoke-btn';
-    revokeBtn.textContent = '撤回';
+    revokeBtn.title = '撤回私语';
+    revokeBtn.setAttribute('aria-label', '撤回');
+    revokeBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95">
+        <path d="M9 14L4 9l5-5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
     revokeBtn.addEventListener('click', () => revokeMessageById(msg.id, { notifyPeer: true }));
     metaBarEl.appendChild(revokeBtn);
   }
@@ -1377,14 +1408,14 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
  */
 function terminateAndBurnSession({ notifyPeer = true } = {}) {
   if (isSessionTerminated) return;
-  isSessionTerminated = true;
 
   cleanupMemoryAndLeaveRoom({ notifyPeer, silent: false });
+  isSessionTerminated = true;
 
   // 清除 URL 中的 #room=<房间ID> 片段，防止历史回退残留
   history.replaceState(null, '', window.location.pathname + window.location.search);
 
-  // 展示“对话已结束，痕迹已清除”终态画面
+  // 展示“话已燃尽，一切随风去吧”画框终态画面
   document.body.classList.remove('in-chat-mode');
   landingViewEl.classList.add('hidden');
   chatViewEl.classList.add('hidden');

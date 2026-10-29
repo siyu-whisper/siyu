@@ -17,7 +17,8 @@ siyu/
 ├── .gitignore                   # Git 忽略规则（忽略 node_modules/ 与 dist/）
 ├── public/
 │   ├── logo.svg                 # 私语专属 L1 极简折页耳语 Logo
-│   └── hero-couple.jpg          # 首页中央相框画芯（长椅旧报私语）
+│   ├── hero-couple.jpg          # 首页中央相框画芯（长椅旧报私语）
+│   └── end-burn.jpg             # 结束页中央相框画芯（话已燃尽，一切随风去吧）
 └── .github/workflows/deploy.yml # GitHub Actions 自动构建并推送到 gh-pages 分支
 ```
 
