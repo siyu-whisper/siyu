@@ -84,6 +84,15 @@ let isSessionTerminated = false;
 
 // 屏幕共享 / 一起看电影运行态（驻留内存）
 let localScreenStream = null;
+let localShareMicStream = null;
+let outboundShareStream = null;
+let shareAudioContext = null;
+let shareAudioDestNode = null;
+let shareMicGainNode = null;
+let isShareMicEnabled = false;
+let hasSystemAudioTrack = false;
+let activeScreenSharerId = null;
+let screenFrameSyncTimer = null;
 
 // 语音录制与播放运行态（驻留内存）
 let mediaRecorder = null;
@@ -142,8 +151,11 @@ const inviteFormatHintEl = document.getElementById('invite-format-hint');
 
 const cinemaStageEl = document.getElementById('cinema-stage');
 const cinemaTitleEl = document.getElementById('cinema-title');
+const cinemaAudioBadgeEl = document.getElementById('cinema-audio-badge');
+const toggleShareMicBtn = document.getElementById('toggle-share-mic-btn');
 const stopScreenShareBtn = document.getElementById('stop-screen-share-btn');
 const sharedScreenVideoEl = document.getElementById('shared-screen-video');
+const sharedScreenFallbackImgEl = document.getElementById('shared-screen-fallback-img');
 
 const messageListEl = document.getElementById('message-list');
 const emptyChatHintEl = document.getElementById('empty-chat-hint');
@@ -484,13 +496,15 @@ function bindTrysteroRoomActions(room) {
   room.onPeerJoin((peerId) => {
     if (isSessionTerminated) return;
     broadcastEnvelopePacket(buildHelloPacket('hello'));
-    // 若当前正在共享屏幕，自动将视频流推送给新加入的成员
-    if (localScreenStream && typeof room.addStream === 'function') {
+    // 若当前正在共享屏幕，自动将合成流与共享状态同步给新加入的成员
+    const activeStreamToShare = outboundShareStream || localScreenStream;
+    if (activeStreamToShare && typeof room.addStream === 'function') {
       try {
-        room.addStream(localScreenStream, peerId);
+        room.addStream(activeStreamToShare, peerId);
       } catch {
         // 忽略异常
       }
+      broadcastScreenShareMeta('screen-share-start');
     }
   });
 
@@ -500,16 +514,39 @@ function bindTrysteroRoomActions(room) {
 
   if (typeof room.onPeerStream === 'function') {
     room.onPeerStream((stream, peerId) => {
+      if (isSessionTerminated) return;
+      activeScreenSharerId = peerId;
       const peerProfile = getSenderDisplayProfile(peerId);
       attachSharedScreenStream(stream, `${peerProfile.alias} 正在分享屏幕 · 同步观看中`, false);
+
+      // 当底层轨道结束或被移除时，接收方自动关闭屏幕共享窗口
+      stream.getTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          if (activeScreenSharerId === peerId) {
+            closeReceiverScreenStage({ reason: `${peerProfile.alias} 已结束屏幕共享` });
+          }
+        });
+      });
+      stream.onremovetrack = () => {
+        if (activeScreenSharerId === peerId && stream.getVideoTracks().length === 0) {
+          closeReceiverScreenStage({ reason: `${peerProfile.alias} 已结束屏幕共享` });
+        }
+      };
     });
   }
 }
 
 function handlePeerDeparture(peerId) {
   if (!peerId) return;
+  const peerProfile = roomParticipants.get(peerId);
   connectedPeers.delete(peerId);
   roomParticipants.delete(peerId);
+  // 若离开的成员正在共享屏幕，接收方立即同步关闭屏幕共享放映框
+  if (activeScreenSharerId === peerId) {
+    closeReceiverScreenStage({
+      reason: `${peerProfile?.alias || '对方'} 已离开，屏幕共享已结束`
+    });
+  }
   updateConnectionStatusUI();
 }
 
@@ -604,6 +641,9 @@ function handleEnvelopePacket(packet) {
       broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
       syncInMemoryHistoryToPeers();
       acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+      if (localScreenStream) {
+        broadcastScreenShareMeta('screen-share-start');
+      }
     } else {
       if ((packet.msgCount === 0 || typeof packet.msgCount === 'undefined') && messages.length > 0) {
         syncInMemoryHistoryToPeers();
@@ -635,6 +675,13 @@ function handleEnvelopePacket(packet) {
   } else if (packet.kind === 'profile-update' && packet.profile) {
     admitAndRegisterPeer(packet.senderId, packet.profile, packet.joinedAt);
     refreshAllMessagesInDOM();
+  } else if (packet.kind === 'screen-share-start' || packet.kind === 'screen-share-meta') {
+    handleIncomingScreenShareMeta(packet);
+  } else if (packet.kind === 'screen-share-frame' && packet.frameDataUrl) {
+    handleIncomingScreenShareFrame(packet);
+  } else if (packet.kind === 'screen-share-stop') {
+    const peerProfile = getSenderDisplayProfile(packet.senderId, packet.alias);
+    closeReceiverScreenStage({ reason: `${peerProfile.alias} 已结束屏幕共享` });
   } else if (packet.kind === 'message' && packet.payload) {
     handleIncomingMessage(packet.payload);
   } else if (packet.kind === 'sync-history' && Array.isArray(packet.items)) {
@@ -1383,9 +1430,42 @@ function openInlineTextEditor(rowEl, bubbleEl, msg) {
 
 /**
  * ============================================================================
- * 七、多媒体与“一起看 / 屏幕共享”功能
+ * 七、多媒体与“一起看 / 屏幕共享”功能（纯净电脑原声 + 可选人声混音 + 退出全员同步关闭）
  * ============================================================================
  */
+function updateShareAudioBadgeAndMicButtonUI(isLocalSharer) {
+  if (!cinemaAudioBadgeEl) return;
+  if (isLocalSharer) {
+    if (toggleShareMicBtn) {
+      toggleShareMicBtn.classList.remove('hidden');
+      toggleShareMicBtn.classList.toggle('is-active', isShareMicEnabled);
+      toggleShareMicBtn.textContent = isShareMicEnabled ? '🎙️ 混入人声: 开' : '🎙️ 混入人声: 关';
+    }
+    if (isShareMicEnabled && hasSystemAudioTrack) {
+      cinemaAudioBadgeEl.textContent = '电脑原声 + 麦克风人声';
+    } else if (isShareMicEnabled && !hasSystemAudioTrack) {
+      cinemaAudioBadgeEl.textContent = '麦克风人声已开启';
+    } else if (hasSystemAudioTrack) {
+      cinemaAudioBadgeEl.textContent = '仅电脑原声（人声已隔绝）';
+    } else {
+      cinemaAudioBadgeEl.textContent = '静音画面（人声已隔绝）';
+    }
+  } else if (toggleShareMicBtn) {
+    toggleShareMicBtn.classList.add('hidden');
+  }
+}
+
+function broadcastScreenShareMeta(kind = 'screen-share-meta') {
+  if (!activeRoomId || isSessionTerminated) return;
+  broadcastEnvelopePacket({
+    kind,
+    senderId: selfId,
+    alias: myProfile.alias,
+    hasSystemAudio: hasSystemAudioTrack,
+    hasMicVoice: isShareMicEnabled
+  });
+}
+
 async function startScreenShareTogether() {
   if (!activeRoomId || isSessionTerminated) return;
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
@@ -1394,29 +1474,92 @@ async function startScreenShareTogether() {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true
+    // 1. 采集屏幕/标签页画面与纯净电脑原声（关闭语音降噪/回声消除，避免电影原声失真，默认不采集麦克风人声）
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: { ideal: 30, max: 60 }
+      },
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: false,
+        systemAudio: 'include'
+      },
+      systemAudio: 'include'
     });
-    stopScreenShareTogether();
-    localScreenStream = stream;
 
-    attachSharedScreenStream(stream, `${myProfile.alias}（你）正在共享屏幕 · 同步放映中`, true);
+    // 若此前已有共享，先静默清理
+    stopScreenShareTogether({ notifyPeer: false });
+
+    localScreenStream = displayStream;
+    activeScreenSharerId = selfId;
+    isShareMicEnabled = false;
+
+    const sysAudioTracks = displayStream.getAudioTracks();
+    hasSystemAudioTrack = sysAudioTracks.length > 0;
+
+    // 2. 构建 WebAudio 混音管线（支持电脑原声与可选的麦克风人声动态混流）
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      try {
+        shareAudioContext = new AudioCtx();
+        shareAudioDestNode = shareAudioContext.createMediaStreamDestination();
+        shareMicGainNode = shareAudioContext.createGain();
+        shareMicGainNode.gain.value = 0; // 默认关闭麦克风人声，仅传纯净电脑原声
+        shareMicGainNode.connect(shareAudioDestNode);
+
+        if (hasSystemAudioTrack) {
+          const sysSource = shareAudioContext.createMediaStreamSource(
+            new MediaStream([sysAudioTracks[0]])
+          );
+          const sysGain = shareAudioContext.createGain();
+          sysGain.gain.value = 1.0;
+          sysSource.connect(sysGain).connect(shareAudioDestNode);
+        }
+      } catch {
+        shareAudioContext = null;
+        shareAudioDestNode = null;
+      }
+    }
+
+    const videoTrack = displayStream.getVideoTracks()[0];
+    const mixedTracks = [videoTrack];
+    if (shareAudioDestNode && shareAudioDestNode.stream.getAudioTracks().length > 0) {
+      mixedTracks.push(shareAudioDestNode.stream.getAudioTracks()[0]);
+    } else if (hasSystemAudioTrack) {
+      mixedTracks.push(sysAudioTracks[0]);
+    }
+    outboundShareStream = new MediaStream(mixedTracks.filter(Boolean));
+
+    // 3. 本地展开预览（本地静音防止回声）并更新音频状态标签
+    attachSharedScreenStream(
+      displayStream,
+      `${myProfile.alias}（你）正在共享屏幕 · 同步放映中`,
+      true
+    );
+    updateShareAudioBadgeAndMicButtonUI(true);
+
+    // 4. 通知房间内所有成员打开屏幕放映窗，并通过 WebRTC 推送音视频流
+    broadcastScreenShareMeta('screen-share-start');
 
     for (const room of activeRooms) {
       if (typeof room.addStream === 'function') {
         try {
-          room.addStream(stream);
+          room.addStream(outboundShareStream);
         } catch {
           // 忽略单个房间异常
         }
       }
     }
 
-    const videoTrack = stream.getVideoTracks()[0];
+    // 5. 启动轻量级关键帧同步兜底（确保受限 NAT 或同浏览器标签页也能实时看到画面并在停止时立即消失）
+    startScreenFrameFallbackLoop();
+
+    // 6. 当用户点击浏览器自带的“停止共享”浮条时，自动触发全员关闭
     if (videoTrack) {
       videoTrack.onended = () => {
-        stopScreenShareTogether();
+        stopScreenShareTogether({ notifyPeer: true });
       };
     }
   } catch {
@@ -1424,16 +1567,222 @@ async function startScreenShareTogether() {
   }
 }
 
+/**
+ * 切换是否在屏幕共享中混入“电脑原声之外的麦克风人声”
+ */
+async function toggleShareMicrophoneVoice() {
+  if (!localScreenStream || isSessionTerminated) return;
+
+  if (isShareMicEnabled) {
+    // 关闭麦克风人声，恢复为仅电脑原声
+    isShareMicEnabled = false;
+    if (shareMicGainNode) {
+      shareMicGainNode.gain.value = 0;
+    }
+    releaseShareMicStream();
+    updateShareAudioBadgeAndMicButtonUI(true);
+    broadcastScreenShareMeta('screen-share-meta');
+    showToast('已关闭麦克风人声，当前仅分享电脑原声');
+    return;
+  }
+
+  // 开启麦克风人声并混入共享音轨
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    showToast('当前设备不支持麦克风人声采集');
+    return;
+  }
+
+  try {
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: false
+    });
+    releaseShareMicStream();
+    localShareMicStream = micStream;
+
+    if (shareAudioContext && shareMicGainNode) {
+      if (shareAudioContext.state === 'suspended') {
+        await shareAudioContext.resume();
+      }
+      const micSource = shareAudioContext.createMediaStreamSource(micStream);
+      micSource.connect(shareMicGainNode);
+      shareMicGainNode.gain.value = 1.0;
+    }
+
+    isShareMicEnabled = true;
+    updateShareAudioBadgeAndMicButtonUI(true);
+    broadcastScreenShareMeta('screen-share-meta');
+    showToast('已开启麦克风人声同步，对方可同时听到电脑原声与你的说话声');
+  } catch {
+    showToast('未获取到麦克风权限，当前仅分享电脑原声');
+  }
+}
+
+function releaseShareMicStream() {
+  if (localShareMicStream) {
+    localShareMicStream.getTracks().forEach((t) => t.stop());
+    localShareMicStream = null;
+  }
+}
+
+function startScreenFrameFallbackLoop() {
+  if (screenFrameSyncTimer) clearInterval(screenFrameSyncTimer);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  screenFrameSyncTimer = setInterval(() => {
+    if (!localScreenStream || isSessionTerminated || !sharedScreenVideoEl) return;
+    const vw = sharedScreenVideoEl.videoWidth;
+    const vh = sharedScreenVideoEl.videoHeight;
+    if (!vw || !vh) return;
+
+    const targetW = Math.min(640, vw);
+    const targetH = Math.round((vh * targetW) / vw);
+    canvas.width = targetW;
+    canvas.height = targetH;
+    try {
+      ctx.drawImage(sharedScreenVideoEl, 0, 0, targetW, targetH);
+      const frameDataUrl = canvas.toDataURL('image/jpeg', 0.55);
+      broadcastEnvelopePacket({
+        kind: 'screen-share-frame',
+        senderId: selfId,
+        alias: myProfile.alias,
+        hasSystemAudio: hasSystemAudioTrack,
+        hasMicVoice: isShareMicEnabled,
+        frameDataUrl
+      });
+    } catch {
+      // 忽略单帧绘制异常
+    }
+  }, 900);
+}
+
 function attachSharedScreenStream(stream, titleText, isLocalSharer) {
   if (!cinemaStageEl || !sharedScreenVideoEl) return;
   cinemaTitleEl.textContent = titleText;
   stopScreenShareBtn.classList.toggle('hidden', !isLocalSharer);
+  if (sharedScreenFallbackImgEl) {
+    sharedScreenFallbackImgEl.src = '';
+    sharedScreenFallbackImgEl.classList.add('hidden');
+  }
+  sharedScreenVideoEl.classList.remove('hidden');
   sharedScreenVideoEl.srcObject = stream;
   sharedScreenVideoEl.muted = Boolean(isLocalSharer);
   cinemaStageEl.classList.remove('hidden');
+  sharedScreenVideoEl.play().catch(() => {
+    // 若浏览器策略限制带声音自动播放，先静音起播保证画面即刻呈现
+    if (!isLocalSharer) {
+      sharedScreenVideoEl.muted = true;
+      sharedScreenVideoEl.play().catch(() => {});
+    }
+  });
 }
 
-function stopScreenShareTogether() {
+function handleIncomingScreenShareMeta(packet) {
+  if (!cinemaStageEl || isSessionTerminated) return;
+  activeScreenSharerId = packet.senderId;
+  const peerProfile = getSenderDisplayProfile(packet.senderId, packet.alias);
+  cinemaTitleEl.textContent = `${peerProfile.alias} 正在分享屏幕 · 同步观看中`;
+  stopScreenShareBtn.classList.add('hidden');
+  if (toggleShareMicBtn) toggleShareMicBtn.classList.add('hidden');
+
+  if (cinemaAudioBadgeEl) {
+    if (packet.hasSystemAudio && packet.hasMicVoice) {
+      cinemaAudioBadgeEl.textContent = '电脑原声 + 麦克风人声';
+    } else if (packet.hasMicVoice) {
+      cinemaAudioBadgeEl.textContent = '麦克风人声同步中';
+    } else if (packet.hasSystemAudio) {
+      cinemaAudioBadgeEl.textContent = '仅电脑原声（人声已隔绝）';
+    } else {
+      cinemaAudioBadgeEl.textContent = '同步画面中';
+    }
+  }
+  cinemaStageEl.classList.remove('hidden');
+}
+
+function handleIncomingScreenShareFrame(packet) {
+  if (!cinemaStageEl || isSessionTerminated) return;
+  if (activeScreenSharerId && activeScreenSharerId !== packet.senderId) return;
+
+  handleIncomingScreenShareMeta(packet);
+
+  // 若接收端尚未收到原生 WebRTC 视频流，则使用加密同步帧展示画面
+  const hasLiveWebRtcVideo =
+    sharedScreenVideoEl &&
+    sharedScreenVideoEl.srcObject &&
+    sharedScreenVideoEl.srcObject.getVideoTracks &&
+    sharedScreenVideoEl.srcObject.getVideoTracks().some((t) => t.readyState === 'live');
+
+  if (!hasLiveWebRtcVideo && sharedScreenFallbackImgEl) {
+    sharedScreenVideoEl.classList.add('hidden');
+    sharedScreenFallbackImgEl.src = packet.frameDataUrl;
+    sharedScreenFallbackImgEl.classList.remove('hidden');
+  }
+}
+
+/**
+ * 接收方收到分享者退出分享通知时：立即清空视频/帧缓冲并关闭放映框
+ */
+function closeReceiverScreenStage({ reason = '' } = {}) {
+  activeScreenSharerId = null;
+  if (sharedScreenVideoEl) {
+    try {
+      sharedScreenVideoEl.pause();
+      if (sharedScreenVideoEl.srcObject) {
+        const tracks = sharedScreenVideoEl.srcObject.getTracks?.() || [];
+        tracks.forEach((t) => t.stop());
+      }
+      sharedScreenVideoEl.srcObject = null;
+      sharedScreenVideoEl.removeAttribute('src');
+      sharedScreenVideoEl.load();
+    } catch {
+      // 忽略异常
+    }
+    sharedScreenVideoEl.classList.remove('hidden');
+  }
+  if (sharedScreenFallbackImgEl) {
+    sharedScreenFallbackImgEl.src = '';
+    sharedScreenFallbackImgEl.classList.add('hidden');
+  }
+  if (cinemaStageEl && !cinemaStageEl.classList.contains('hidden')) {
+    cinemaStageEl.classList.add('hidden');
+    if (reason) {
+      showToast(reason);
+    }
+  }
+}
+
+/**
+ * 分享者停止屏幕共享：停止本地采集与混音，并广播 `screen-share-stop` 让所有接收者立即关闭画面
+ */
+function stopScreenShareTogether({ notifyPeer = true } = {}) {
+  const wasSharing = Boolean(
+    localScreenStream || outboundShareStream || activeScreenSharerId === selfId
+  );
+
+  if (screenFrameSyncTimer) {
+    clearInterval(screenFrameSyncTimer);
+    screenFrameSyncTimer = null;
+  }
+
+  if (outboundShareStream) {
+    for (const room of activeRooms) {
+      if (typeof room.removeStream === 'function') {
+        try {
+          room.removeStream(outboundShareStream);
+        } catch {
+          // 忽略异常
+        }
+      }
+    }
+    outboundShareStream.getTracks().forEach((track) => track.stop());
+    outboundShareStream = null;
+  }
+
   if (localScreenStream) {
     for (const room of activeRooms) {
       if (typeof room.removeStream === 'function') {
@@ -1444,14 +1793,38 @@ function stopScreenShareTogether() {
         }
       }
     }
-    localScreenStream.getTracks().forEach((track) => track.stop());
+    localScreenStream.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
     localScreenStream = null;
   }
-  if (sharedScreenVideoEl) {
-    sharedScreenVideoEl.srcObject = null;
+
+  releaseShareMicStream();
+  isShareMicEnabled = false;
+  hasSystemAudioTrack = false;
+  shareMicGainNode = null;
+  shareAudioDestNode = null;
+
+  if (shareAudioContext) {
+    try {
+      shareAudioContext.close();
+    } catch {
+      // 忽略异常
+    }
+    shareAudioContext = null;
   }
-  if (cinemaStageEl) {
-    cinemaStageEl.classList.add('hidden');
+
+  closeReceiverScreenStage({ reason: '' });
+
+  // 广播停止屏幕共享信号，使所有接收者界面立即同步收起放映框
+  if (notifyPeer && wasSharing && activeRoomId && !isSessionTerminated) {
+    broadcastEnvelopePacket({
+      kind: 'screen-share-stop',
+      senderId: selfId,
+      alias: myProfile.alias
+    });
+    showToast('已停止屏幕共享');
   }
 }
 
@@ -2169,15 +2542,20 @@ chatViewEl.addEventListener('drop', (event) => {
   }
 });
 
-// 10. 共享屏幕 / 一起看电影
+// 10. 共享屏幕 / 一起看电影 + 麦克风人声混音开关
 if (screenShareBtn) {
   screenShareBtn.addEventListener('click', () => {
     startScreenShareTogether();
   });
 }
+if (toggleShareMicBtn) {
+  toggleShareMicBtn.addEventListener('click', () => {
+    toggleShareMicrophoneVoice();
+  });
+}
 if (stopScreenShareBtn) {
   stopScreenShareBtn.addEventListener('click', () => {
-    stopScreenShareTogether();
+    stopScreenShareTogether({ notifyPeer: true });
   });
 }
 
