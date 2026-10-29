@@ -6,8 +6,8 @@
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BoxwIc6u.svg" />
-  <script type="module" crossorigin src="/siyu/assets/index-Di8uQ57A.js"></script>
-  <link rel="stylesheet" crossorigin href="/siyu/assets/index-CMVxGNOg.css">
+  <script type="module" crossorigin src="/siyu/assets/index-DRJjyw7N.js"></script>
+  <link rel="stylesheet" crossorigin href="/siyu/assets/index-B1MALQz8.css">
 </head>
 <body>
   <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
@@ -48,7 +48,7 @@
 
     <!-- ==================== 2. 聊天主界面（房间激活时展示） ==================== -->
     <section id="chat-view" class="view-panel chat-panel hidden" aria-label="私语对话窗口">
-      <!-- 顶部固定栏：Logo + 房间状态指示 + 显眼的“结束并清除”按钮 -->
+      <!-- 顶部固定栏：Logo + 房间状态指示 + 方案A国风代号印章 + “结束并清除”按钮 -->
       <header class="chat-topbar">
         <div class="topbar-left">
           <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3c!--%20方案%20L1：折页耳语（中国风对撞色%20%23494266%20黛紫%20×%20%23E9E8EF%20云水灰白）%20--%3e%3crect%20x='4'%20y='4'%20width='56'%20height='56'%20rx='15'%20fill='%23E9E8EF'%20stroke='%23494266'%20stroke-width='1.8'/%3e%3c!--%20左折页与右折页（构成的立体半掩报页）%20--%3e%3cpath%20d='M16%2020L32%2016V45L16%2049V20Z'%20fill='%23DFDDE9'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3cpath%20d='M48%2020L32%2016V45L48%2049V20Z'%20fill='%23F4F3F8'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3c!--%20报页后方微微探出的双人私语圆点%20--%3e%3ccircle%20cx='27.5'%20cy='31.5'%20r='2.3'%20fill='%23494266'/%3e%3ccircle%20cx='36.5'%20cy='31.5'%20r='2.3'%20fill='%237B7399'/%3e%3c!--%20顶部一缕消散于风中的轻音弧线%20--%3e%3cpath%20d='M25%2011.5C29.5%209.2%2034.5%209.2%2039%2011.5'%20stroke='%236E668C'%20stroke-width='1.5'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语" class="brand-logo-sm" width="30" height="30" />
@@ -56,7 +56,23 @@
           <span class="topbar-divider" aria-hidden="true"></span>
           <div id="connection-badge" class="status-badge status-waiting" role="status" aria-live="polite">
             <span class="status-dot"></span>
-            <span id="connection-status-text">等待对方加入</span>
+            <span id="connection-status-text">等待对方加入 (1/2)</span>
+          </div>
+
+          <!-- 方案A：当前用户国风临时雅称胶囊（点击可随时改代号） -->
+          <div class="alias-pill-wrap">
+            <button id="self-alias-btn" type="button" class="self-alias-btn" title="点击修改你在本房间的临时代号">
+              <span class="alias-dot" id="self-alias-dot"></span>
+              <span id="self-alias-text">听风</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+                <path d="M12 20h9" stroke-linecap="round"/>
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div id="alias-edit-box" class="alias-edit-box hidden">
+              <input id="alias-edit-input" type="text" class="alias-edit-input" maxlength="8" placeholder="输入代号" aria-label="输入临时代号" />
+              <button id="alias-save-btn" type="button" class="alias-save-btn">确定</button>
+            </div>
           </div>
         </div>
 
@@ -80,27 +96,45 @@
         </div>
       </header>
 
-      <!-- 房间邀请链接面板（展示可复制的 #room=<房间ID> 链接） -->
+      <!-- 房间邀请链接面板（展示可复制的 #room=<房间ID> 链接 + 默认2人/最大5人上限设置） -->
       <div id="invite-bar" class="invite-bar">
         <div class="invite-info">
           <span class="invite-label">私语邀请链接（高熵凭证，发给对方即可直连）：</span>
           <div class="invite-url-row">
             <input id="invite-link-input" type="text" class="invite-url-input" readonly aria-label="房间邀请链接" />
             <button id="copy-link-btn" type="button" class="copy-link-btn">复制链接</button>
+            <label class="max-peers-control" for="max-peers-select" title="设置房间最大允许进入人数（默认2人，最高5人）">
+              <span class="max-peers-label">人数上限</span>
+              <select id="max-peers-select" class="max-peers-select" aria-label="房间最大人数上限">
+                <option value="2" selected>2人 (默认)</option>
+                <option value="3">3人</option>
+                <option value="4">4人</option>
+                <option value="5">5人 (最大)</option>
+              </select>
+            </label>
           </div>
           <span id="invite-format-hint" class="invite-format-hint"></span>
         </div>
       </div>
 
+      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，边看电影边聊私语） -->
+      <div id="cinema-stage" class="cinema-stage hidden">
+        <div class="cinema-header">
+          <span id="cinema-title" class="cinema-title">正在共享屏幕 · 同步放映中</span>
+          <button id="stop-screen-share-btn" type="button" class="cinema-stop-btn hidden">停止共享</button>
+        </div>
+        <video id="shared-screen-video" class="shared-screen-video" autoplay playsinline controls></video>
+      </div>
+
       <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
       <div id="message-list" class="message-list" role="log" aria-live="polite">
         <div id="empty-chat-hint" class="empty-chat-hint">
-          <p>消息仅驻留于当前内存，支持发送文字、图片与语音</p>
-          <p class="empty-sub">支持已读/未读状态、消息撤回、文字修改重刷 · 点击“结束并清除”即刻双端销毁</p>
+          <p>消息仅驻留于当前内存，支持发送文字、图片、语音与屏幕同看</p>
+          <p class="empty-sub">未读 × · 已读 ✓ · 支持撤回与文字重刷 · 任一人点击结束则全员退出且链接失效</p>
         </div>
       </div>
 
-      <!-- 底部输入区（支持盒子IM风格语音录制、图片发送、文字输入 + 发送按钮） -->
+      <!-- 底部输入区（支持盒子IM风格语音录制、图片发送、屏幕同看、文字输入 + 发送按钮） -->
       <footer class="chat-composer">
         <!-- 常规输入栏 -->
         <div id="composer-normal-row" class="composer-row">
@@ -121,6 +155,15 @@
             </svg>
           </button>
           <input id="image-file-input" type="file" accept="image/*" class="hidden" />
+
+          <!-- 共享屏幕/一起看电影按钮 -->
+          <button id="screen-share-btn" type="button" class="tool-btn" title="分享屏幕或浏览器标签页（支持同步看电影/视频）" aria-label="共享屏幕一起看">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="2" y="3" width="20" height="14" rx="2.5"/>
+              <path d="M8 21h8M12 17v4" stroke-linecap="round"/>
+              <polygon points="10,7.5 15.5,10 10,12.5" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
 
           <!-- 文字输入框 -->
           <input
