@@ -1,0 +1,26 @@
+{
+  "name": "siyu-whisper",
+  "version": "1.0.0",
+  "description": "私语 (Siyu) — 极简、无后端、点对点阅后即焚临时聊天网页应用 (Trystero + WebRTC + GitHub Pages)",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "webrtc",
+    "p2p",
+    "ephemeral-chat",
+    "trystero",
+    "privacy",
+    "github-pages"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "trystero": "^0.20.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
