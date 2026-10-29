@@ -6,8 +6,8 @@
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BoxwIc6u.svg" />
-  <script type="module" crossorigin src="/siyu/assets/index-DRJjyw7N.js"></script>
-  <link rel="stylesheet" crossorigin href="/siyu/assets/index-B1MALQz8.css">
+  <script type="module" crossorigin src="/siyu/assets/index-CWdCUzNO.js"></script>
+  <link rel="stylesheet" crossorigin href="/siyu/assets/index-Yr7DIaqu.css">
 </head>
 <body>
   <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
@@ -117,13 +117,24 @@
         </div>
       </div>
 
-      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，边看电影边聊私语） -->
+      <!-- 一起看/屏幕共享放映区（开启屏幕共享时自动展开，默认隔绝麦克风人声、仅传电脑原声，支持一键开关人声混音） -->
       <div id="cinema-stage" class="cinema-stage hidden">
         <div class="cinema-header">
-          <span id="cinema-title" class="cinema-title">正在共享屏幕 · 同步放映中</span>
-          <button id="stop-screen-share-btn" type="button" class="cinema-stop-btn hidden">停止共享</button>
+          <div class="cinema-title-group">
+            <span id="cinema-title" class="cinema-title">正在共享屏幕 · 同步放映中</span>
+            <span id="cinema-audio-badge" class="cinema-audio-badge">仅电脑原声（人声已隔绝）</span>
+          </div>
+          <div class="cinema-controls">
+            <button id="toggle-share-mic-btn" type="button" class="cinema-mic-btn hidden" title="切换是否将你的麦克风说话人声混入屏幕共享">
+              🎙️ 混入人声: 关
+            </button>
+            <button id="stop-screen-share-btn" type="button" class="cinema-stop-btn hidden">
+              停止共享
+            </button>
+          </div>
         </div>
         <video id="shared-screen-video" class="shared-screen-video" autoplay playsinline controls></video>
+        <img id="shared-screen-fallback-img" class="shared-screen-video hidden" alt="屏幕共享同步画面" />
       </div>
 
       <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
