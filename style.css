@@ -313,6 +313,72 @@ body {
   gap: 10px;
 }
 
+/* 方案A：顶部当前用户国风代号印章胶囊 */
+.alias-pill-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.self-alias-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand-purple);
+  background: rgba(73, 66, 102, 0.08);
+  border: 1px solid rgba(73, 66, 102, 0.2);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.self-alias-btn:hover {
+  background: rgba(73, 66, 102, 0.14);
+}
+
+.self-alias-btn svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.72;
+}
+
+.alias-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-purple);
+}
+
+.alias-edit-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.alias-edit-input {
+  width: 86px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--brand-purple);
+  background: #ffffff;
+  border: 1px solid var(--brand-purple);
+  border-radius: 999px;
+  outline: none;
+}
+
+.alias-save-btn {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--brand-mist);
+  background: var(--brand-purple);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
 .ghost-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -419,9 +485,80 @@ body {
   background: var(--brand-purple-hover);
 }
 
+/* 分享链接后方的人数上限控制器（默认2人，最高5人） */
+.max-peers-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: #FAF9FD;
+  border: 1px solid rgba(73, 66, 102, 0.24);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.max-peers-label {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+.max-peers-select {
+  padding: 6px 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-purple);
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+}
+
 .invite-format-hint {
   font-size: 11px;
   color: var(--ink-muted);
+}
+
+/* 一起看 / 屏幕共享放映区 */
+.cinema-stage {
+  width: 100%;
+  background: #1d1a2b;
+  border-bottom: 1px solid var(--card-border);
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cinema-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cinema-title {
+  font-size: 12px;
+  color: var(--brand-mist);
+  letter-spacing: 0.04em;
+}
+
+.cinema-stop-btn {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: #ffffff;
+  background: var(--danger-bg);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.shared-screen-video {
+  width: 100%;
+  max-height: 240px;
+  border-radius: 10px;
+  background: #0f0d17;
+  object-fit: contain;
 }
 
 /* ==================== 消息列表区域（#494266 × #E9E8EF 对撞气泡 + 撤回/修改/已读） ==================== */
@@ -477,6 +614,27 @@ body {
 
 .msg-row.msg-is-revoked {
   align-items: center;
+}
+
+/* 方案A：消息气泡上方的国风二字代号印章标签（多人聊天清晰区分发言者） */
+.msg-sender-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  padding: 1.5px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border: 1px solid rgba(73, 66, 102, 0.18);
+  user-select: none;
+}
+
+.msg-sender-seal .seal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 
 .msg-bubble {

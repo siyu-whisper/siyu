@@ -1,37 +1,72 @@
 /**
  * ============================================================================
  * 私语 (Siyu) — 极简、无后端、点对点阅后即焚临时聊天应用
- * 架构：Trystero (WebRTC DataChannel 端到端加密) + 纯内存驻留 + 退出双向即焚
+ * 架构：Trystero (WebRTC DataChannel 端到端加密) + E2EE 零存储跨网直连 + 纯内存驻留 + 退出全员即焚
  * ============================================================================
- *
- * 【上线前唯一必填配置】
- * 将下方 APP_ID 替换为你自己定义的任意唯一字符串标识即可构建上线：
  */
 import { joinRoom as joinMqttRoom, selfId } from 'trystero/mqtt';
 import { joinRoom as joinNostrRoom } from 'trystero/nostr';
 
 const APP_ID = 'waiting-for-you-siyu';
 
-// 国内外高可用公共 WSS 消息中继（仅用于 WebRTC 信令握手与 NAT 受限时的 AES-GCM-256 端到端加密瞬态转发，QoS=0 / Retain=false 零存储）
+// 国内外高可用公共 WSS 消息中继（用于 WebRTC 信令握手、AES-GCM-256 端到端加密瞬态转发及房间销毁墓碑标记）
 const PUBLIC_WSS_BROKERS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
   'wss://test.mosquitto.org:8081/mqtt'
 ];
 
+// 方案A：国风二字雅称池与专属莫兰迪印章配色（2~5人聊天时自动分配不同代号，清晰区分是谁说的）
+const POETIC_PROFILES = [
+  { alias: '听风', color: '#494266', bg: 'rgba(73, 66, 102, 0.12)' },
+  { alias: '枕月', color: '#3B6E6C', bg: 'rgba(59, 110, 108, 0.12)' },
+  { alias: '观云', color: '#565F8A', bg: 'rgba(86, 95, 138, 0.12)' },
+  { alias: '拾叶', color: '#825B45', bg: 'rgba(130, 91, 69, 0.12)' },
+  { alias: '眠雪', color: '#7A4E65', bg: 'rgba(122, 78, 101, 0.12)' },
+  { alias: '伴竹', color: '#4B6B53', bg: 'rgba(75, 107, 83, 0.12)' },
+  { alias: '知雨', color: '#48637A', bg: 'rgba(72, 99, 122, 0.12)' },
+  { alias: '寻山', color: '#6E5A4F', bg: 'rgba(110, 90, 79, 0.12)' }
+];
+
 /**
  * ============================================================================
- * 一、纯内存消息存储（核心安全原则：零持久化）
+ * 一、纯内存消息与房间状态管理（核心安全原则：消息零持久化）
  * ============================================================================
  * 1. `messages` 数组仅存在于当前页面 JS 引擎的堆内存中。
- * 2. 严禁写入 localStorage、sessionStorage、IndexedDB、CacheStorage 或 Cookie。
- * 3. 当朋友通过邀请链接后加入房间时，本端会自动将内存中的 `messages` 加密同步给对方，
- *    解决“先发消息、朋友后点链接进来看不到此前对话”的问题。
+ * 2. 严禁将 `messages` 写入 localStorage、sessionStorage、IndexedDB、CacheStorage 或 Cookie。
+ * 3. `burnedRoomIds` 记录已结束销毁的房间 ID（配合 window.name 内存属性与 WSS 加密墓碑标记），
+ *    确保任何一人点击“结束并清除”后，全员自动退出且原房间链接永久失效。
  */
 let messages = [];
 const processedMessageIds = new Set();
 const ephemeralObjectUrls = new Set();
 const incomingChunkBuffer = new Map();
+const burnedRoomIds = new Set();
+
+// 从当前标签页内存属性 window.name 中恢复本标签已销毁的房间 ID（不读写任何 Storage/Cookie）
+(function restoreBurnedRoomsFromWindowMemory() {
+  try {
+    if (window.name && window.name.startsWith('siyu_mem:')) {
+      const parsed = JSON.parse(window.name.slice(9));
+      if (Array.isArray(parsed)) {
+        parsed.forEach((id) => burnedRoomIds.add(id));
+      }
+    }
+  } catch {
+    // 忽略异常
+  }
+})();
+
+function recordRoomBurnedInMemory(roomId) {
+  if (!roomId) return;
+  burnedRoomIds.add(roomId);
+  try {
+    const list = Array.from(burnedRoomIds).slice(-50);
+    window.name = `siyu_mem:${JSON.stringify(list)}`;
+  } catch {
+    // 忽略异常
+  }
+}
 
 // 当前房间运行态（全部驻留内存，离开即销毁）
 let activeRooms = [];
@@ -42,7 +77,13 @@ let e2eeWssClients = [];
 let presenceHeartbeatTimer = null;
 let localEphemeralBus = null;
 let connectedPeers = new Set();
+let roomParticipants = new Map(); // peerId -> { id, alias, color, bg, joinedAt }
+let maxRoomCapacity = 2;          // 默认最大人数为 2，最高可设为 5
+let selfJoinedAt = 0;
 let isSessionTerminated = false;
+
+// 屏幕共享 / 一起看电影运行态（驻留内存）
+let localScreenStream = null;
 
 // 语音录制与播放运行态（驻留内存）
 let mediaRecorder = null;
@@ -54,10 +95,29 @@ let isSyntheticRecording = false;
 let currentPlayingAudio = null;
 let currentPlayingBoxEl = null;
 
+// 初始化当前用户的默认国风雅称
+function pickInitialProfile(seedStr) {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = (hash * 31 + seedStr.charCodeAt(i)) >>> 0;
+  }
+  const chosen = POETIC_PROFILES[hash % POETIC_PROFILES.length];
+  return {
+    alias: chosen.alias,
+    color: chosen.color,
+    bg: chosen.bg,
+    custom: false
+  };
+}
+
+let myProfile = pickInitialProfile(selfId);
+
 // ==================== DOM 引用 ====================
 const landingViewEl = document.getElementById('landing-view');
 const chatViewEl = document.getElementById('chat-view');
 const terminatedViewEl = document.getElementById('terminated-view');
+const terminatedTitleEl = document.getElementById('terminated-title');
+const terminatedDescEl = document.getElementById('terminated-desc');
 
 const startWhisperBtn = document.getElementById('start-whisper-btn');
 const toggleInviteBtn = document.getElementById('toggle-invite-btn');
@@ -67,10 +127,23 @@ const backHomeBtn = document.getElementById('back-home-btn');
 const connectionBadgeEl = document.getElementById('connection-badge');
 const connectionStatusTextEl = document.getElementById('connection-status-text');
 
+const selfAliasBtn = document.getElementById('self-alias-btn');
+const selfAliasDotEl = document.getElementById('self-alias-dot');
+const selfAliasTextEl = document.getElementById('self-alias-text');
+const aliasEditBoxEl = document.getElementById('alias-edit-box');
+const aliasEditInputEl = document.getElementById('alias-edit-input');
+const aliasSaveBtn = document.getElementById('alias-save-btn');
+
 const inviteBarEl = document.getElementById('invite-bar');
 const inviteLinkInputEl = document.getElementById('invite-link-input');
 const copyLinkBtn = document.getElementById('copy-link-btn');
+const maxPeersSelectEl = document.getElementById('max-peers-select');
 const inviteFormatHintEl = document.getElementById('invite-format-hint');
+
+const cinemaStageEl = document.getElementById('cinema-stage');
+const cinemaTitleEl = document.getElementById('cinema-title');
+const stopScreenShareBtn = document.getElementById('stop-screen-share-btn');
+const sharedScreenVideoEl = document.getElementById('shared-screen-video');
 
 const messageListEl = document.getElementById('message-list');
 const emptyChatHintEl = document.getElementById('empty-chat-hint');
@@ -80,6 +153,7 @@ const composerRecordingRowEl = document.getElementById('composer-recording-row')
 const voiceRecordBtn = document.getElementById('voice-record-btn');
 const imagePickBtn = document.getElementById('image-pick-btn');
 const imageFileInput = document.getElementById('image-file-input');
+const screenShareBtn = document.getElementById('screen-share-btn');
 const messageInputEl = document.getElementById('message-input');
 const sendMsgBtn = document.getElementById('send-msg-btn');
 
@@ -92,18 +166,60 @@ const imageLightboxEl = document.getElementById('image-lightbox');
 const lightboxImgEl = document.getElementById('lightbox-img');
 const toastContainerEl = document.getElementById('toast-container');
 
-/**
- * ============================================================================
- * 二、# 片段（Hash Fragment）房间 ID 解析与高熵房间 ID 生成
- * ============================================================================
- * 原理说明：
- * URL 中 `#` 号后面的 Fragment（如 `https://<用户名>.github.io/<仓库名>/#room=<房间ID>`）
- * 仅由浏览器在本地解析，根据 RFC 3986 标准，浏览器绝不会将 `#` 及其后内容放进 HTTP 请求发往服务器。
- * 因此 GitHub Pages 托管服务器完全无法获知房间 ID。
- */
+// 跨标签页全局房间状态协调通道（用于秒级同步“房间已销毁”与“人数已满”校验，纯内存不落盘）
+const globalRegistryBus = typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel(`siyu_registry_${APP_ID}`)
+  : null;
+
+if (globalRegistryBus) {
+  globalRegistryBus.onmessage = (event) => {
+    const data = event.data;
+    if (!data) return;
+
+    if (data.kind === 'room-burned' && data.roomId) {
+      recordRoomBurnedInMemory(data.roomId);
+      if (activeRoomId === data.roomId && !isSessionTerminated) {
+        terminateAndBurnSession({ notifyPeer: false, mode: 'burned' });
+      }
+    } else if (data.kind === 'query-room-state' && data.roomId && data.requesterId !== selfId) {
+      // 如果查询的房间已被销毁，立即告知对方该链接已失效
+      if (burnedRoomIds.has(data.roomId)) {
+        globalRegistryBus.postMessage({
+          kind: 'room-state-reply',
+          roomId: data.roomId,
+          targetPeerId: data.requesterId,
+          status: 'terminated'
+        });
+        return;
+      }
+      // 如果查询的正是当前所在活跃房间，检查人数是否已满
+      if (activeRoomId === data.roomId && !isSessionTerminated) {
+        const currentCount = getAdmittedParticipantCount();
+        if (!roomParticipants.has(data.requesterId) && currentCount >= maxRoomCapacity) {
+          globalRegistryBus.postMessage({
+            kind: 'room-state-reply',
+            roomId: data.roomId,
+            targetPeerId: data.requesterId,
+            status: 'full',
+            maxCapacity: maxRoomCapacity
+          });
+        }
+      }
+    } else if (data.kind === 'room-state-reply' && data.roomId === activeRoomId && data.targetPeerId === selfId) {
+      if (data.status === 'terminated') {
+        recordRoomBurnedInMemory(data.roomId);
+        terminateAndBurnSession({ notifyPeer: false, mode: 'expired' });
+      } else if (data.status === 'full') {
+        terminateAndBurnSession({ notifyPeer: false, mode: 'full', maxCap: data.maxCapacity || maxRoomCapacity });
+      }
+    }
+  };
+}
 
 /**
- * 生成 160-bit 密码学高熵房间 ID（作为唯一入房凭证，无需另设密码）
+ * ============================================================================
+ * 二、# 片段（Hash Fragment）房间 ID 解析与端到端加密密钥派生
+ * ============================================================================
  */
 function generateHighEntropyRoomId() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -116,14 +232,11 @@ function generateHighEntropyRoomId() {
   return id;
 }
 
-/**
- * 从 URL 的 `#` 片段中解析房间 ID（匹配 `#room=<房间ID>`）
- */
 function parseRoomIdFromHash() {
   const rawHash = window.location.hash || '';
   if (!rawHash.startsWith('#')) return null;
 
-  const fragment = rawHash.slice(1); // 去掉开头的 '#'
+  const fragment = rawHash.slice(1);
   const params = new URLSearchParams(fragment);
   const roomId = params.get('room');
   if (roomId && /^[A-Za-z0-9_-]{8,64}$/.test(roomId.trim())) {
@@ -132,18 +245,11 @@ function parseRoomIdFromHash() {
   return null;
 }
 
-/**
- * 构造完整可分享的邀请链接
- * 部署在 GitHub Pages 后，格式即为：https://<你的GitHub用户名>.github.io/<仓库名>/#room=<房间ID>
- */
 function buildInviteUrl(roomId) {
   const baseUrl = `${window.location.origin}${window.location.pathname}`;
   return `${baseUrl}#room=${roomId}`;
 }
 
-/**
- * 基于高熵 roomId 派生仅驻留内存的 AES-GCM-256 对称密钥
- */
 async function deriveRoomAesKey(roomId) {
   const encoder = new TextEncoder();
   const seedBytes = encoder.encode(`${APP_ID}::e2ee-key::${roomId}`);
@@ -168,9 +274,9 @@ function base64ToBytes(b64) {
   return out;
 }
 
-async function encryptRoomText(plainText) {
-  if (!roomCryptoKeyPromise) return null;
-  const key = await roomCryptoKeyPromise;
+async function encryptRoomText(plainText, customKeyPromise = roomCryptoKeyPromise) {
+  if (!customKeyPromise) return null;
+  const key = await customKeyPromise;
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plainText);
   const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
@@ -180,9 +286,9 @@ async function encryptRoomText(plainText) {
   };
 }
 
-async function decryptRoomText(ivB64, ctB64) {
-  if (!roomCryptoKeyPromise) return null;
-  const key = await roomCryptoKeyPromise;
+async function decryptRoomText(ivB64, ctB64, customKeyPromise = roomCryptoKeyPromise) {
+  if (!customKeyPromise) return null;
+  const key = await customKeyPromise;
   const iv = base64ToBytes(ivB64);
   const ct = base64ToBytes(ctB64);
   const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
@@ -191,18 +297,105 @@ async function decryptRoomText(ivB64, ctB64) {
 
 /**
  * ============================================================================
- * 三、房间创建、跨网双引擎连接与后进房间内存历史自动同步
+ * 三、方案A：国风代号更新与冲突消解
  * ============================================================================
  */
-function enterRoom(roomId) {
+function renderSelfAliasUI() {
+  if (selfAliasTextEl) selfAliasTextEl.textContent = myProfile.alias;
+  if (selfAliasDotEl) selfAliasDotEl.style.background = myProfile.color;
+}
+renderSelfAliasUI();
+
+function resolveAliasCollisionIfNeeded() {
+  if (myProfile.custom) return;
+  const usedAliases = new Set();
+  for (const [peerId, info] of roomParticipants.entries()) {
+    if (peerId !== selfId && info.alias) {
+      usedAliases.add(info.alias);
+    }
+  }
+  if (!usedAliases.has(myProfile.alias)) return;
+
+  for (const candidate of POETIC_PROFILES) {
+    if (!usedAliases.has(candidate.alias)) {
+      myProfile = {
+        alias: candidate.alias,
+        color: candidate.color,
+        bg: candidate.bg,
+        custom: false
+      };
+      renderSelfAliasUI();
+      if (roomParticipants.has(selfId)) {
+        roomParticipants.set(selfId, {
+          ...roomParticipants.get(selfId),
+          alias: myProfile.alias,
+          color: myProfile.color,
+          bg: myProfile.bg
+        });
+      }
+      return;
+    }
+  }
+}
+
+function getSenderDisplayProfile(senderId, fallbackAlias, fallbackColor, fallbackBg) {
+  if (senderId === selfId) {
+    return myProfile;
+  }
+  const peer = roomParticipants.get(senderId);
+  if (peer && peer.alias) {
+    return peer;
+  }
+  return {
+    alias: fallbackAlias || '旅人',
+    color: fallbackColor || '#3B6E6C',
+    bg: fallbackBg || 'rgba(59, 110, 108, 0.12)'
+  };
+}
+
+/**
+ * ============================================================================
+ * 四、房间创建、人数上限门禁（2~5人）与失效连接拦截
+ * ============================================================================
+ */
+function getAdmittedParticipantCount() {
+  return Math.max(1, roomParticipants.size);
+}
+
+function enterRoom(roomId, { isCreator = false } = {}) {
+  // 若该房间链接已被标记为结束销毁，立即拦截并提示“连接已失效”
+  if (burnedRoomIds.has(roomId)) {
+    terminateAndBurnSession({ notifyPeer: false, mode: 'expired' });
+    return;
+  }
+
   if (activeRooms.length > 0 || e2eeWssClients.length > 0 || localEphemeralBus) {
     cleanupMemoryAndLeaveRoom({ silent: true });
   }
 
   isSessionTerminated = false;
   activeRoomId = roomId;
+  selfJoinedAt = isCreator ? Date.now() - 10 : Date.now();
   roomCryptoKeyPromise = deriveRoomAesKey(roomId);
   connectedPeers.clear();
+  roomParticipants.clear();
+
+  // 初始化最大人数上限（默认 2 人，最大 5 人）
+  if (isCreator) {
+    maxRoomCapacity = 2;
+    if (maxPeersSelectEl) maxPeersSelectEl.value = '2';
+  } else {
+    maxRoomCapacity = Number(maxPeersSelectEl?.value) || 2;
+  }
+
+  // 将自己登记入房间参与者表
+  roomParticipants.set(selfId, {
+    id: selfId,
+    alias: myProfile.alias,
+    color: myProfile.color,
+    bg: myProfile.bg,
+    joinedAt: selfJoinedAt
+  });
 
   const inviteUrl = buildInviteUrl(roomId);
   history.replaceState(null, '', `#room=${roomId}`);
@@ -213,10 +406,19 @@ function enterRoom(roomId) {
   chatViewEl.classList.remove('hidden');
 
   inviteLinkInputEl.value = inviteUrl;
-  inviteFormatHintEl.textContent = `当前房间凭证仅存于 #room=${roomId}，不会发送给任何服务器`;
+  inviteFormatHintEl.textContent = `当前房间凭证仅存于 #room=${roomId}，任一人点击结束则全员退出且此链接立即失效`;
   inviteBarEl.classList.remove('hidden');
 
   updateConnectionStatusUI();
+
+  // 向全局注册表通道发起快速校验（检查是否已失效或已满员）
+  if (globalRegistryBus) {
+    globalRegistryBus.postMessage({
+      kind: 'query-room-state',
+      roomId,
+      requesterId: selfId
+    });
+  }
 
   // 1. 启动 Trystero WebRTC P2P 双策略房间（MQTT WebRTC + Nostr WebRTC）
   const strategies = [
@@ -230,14 +432,14 @@ function enterRoom(roomId) {
       activeRooms.push(room);
       bindTrysteroRoomActions(room);
     } catch {
-      // 单个策略初始化异常时不影响其他通道
+      // 单个策略异常不影响其他通道
     }
   }
 
-  // 2. 启动端到端加密（AES-GCM-256）WSS 零存储直连通道（解决手机4G/5G对称NAT或防火墙阻断UDP导致看不到消息的问题）
-  startE2eeZeroStorageWssBridge(roomId);
+  // 2. 启动端到端加密（AES-GCM-256）WSS 零存储直连与房间状态墓碑监听
+  startE2eeZeroStorageWssBridge(roomId, { isCreator });
 
-  // 3. 启动同源内存 BroadcastChannel 通道（同浏览器多标签秒级直连）
+  // 3. 启动同源内存 BroadcastChannel 通道
   if (typeof BroadcastChannel !== 'undefined') {
     const bus = new BroadcastChannel(`siyu_ephemeral_${APP_ID}_${roomId}`);
     localEphemeralBus = bus;
@@ -246,26 +448,31 @@ function enterRoom(roomId) {
       handleEnvelopePacket(event.data);
     };
 
-    bus.postMessage({ kind: 'hello', senderId: selfId });
+    bus.postMessage(buildHelloPacket('hello'));
   }
 
-  // 4. 定时发送在线心跳与历史同步探针，确保朋友随时进来都能秒级变为“已连接”并看到此前发送的内容
+  // 4. 定时发送在线心跳与人数同步探针
   if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
   presenceHeartbeatTimer = setInterval(() => {
     if (!activeRoomId || isSessionTerminated) return;
-    broadcastEnvelopePacket({
-      kind: 'hello-ack',
-      senderId: selfId,
-      msgCount: messages.length
-    });
+    broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
   }, 4500);
 
   messageInputEl.focus();
 }
 
-/**
- * 绑定单个 Trystero 房间的动作与对端发现事件
- */
+function buildHelloPacket(kind = 'hello') {
+  return {
+    kind,
+    senderId: selfId,
+    joinedAt: selfJoinedAt,
+    profile: myProfile,
+    maxCapacity: maxRoomCapacity,
+    admittedIds: Array.from(roomParticipants.keys()),
+    msgCount: messages.length
+  };
+}
+
 function bindTrysteroRoomActions(room) {
   const [sendPacket, onPacket] = room.makeAction('siyu-pkt');
   p2pDispatchers.push(sendPacket);
@@ -275,39 +482,159 @@ function bindTrysteroRoomActions(room) {
   });
 
   room.onPeerJoin((peerId) => {
-    registerPeerConnected(peerId);
-    // 对方通过 WebRTC DataChannel 加入时，立即将内存中已发送的消息同步给对方
-    syncInMemoryHistoryToPeers();
-    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+    if (isSessionTerminated) return;
+    broadcastEnvelopePacket(buildHelloPacket('hello'));
+    // 若当前正在共享屏幕，自动将视频流推送给新加入的成员
+    if (localScreenStream && typeof room.addStream === 'function') {
+      try {
+        room.addStream(localScreenStream, peerId);
+      } catch {
+        // 忽略异常
+      }
+    }
   });
 
   room.onPeerLeave((peerId) => {
-    connectedPeers.delete(peerId);
-    updateConnectionStatusUI();
+    handlePeerDeparture(peerId);
   });
+
+  if (typeof room.onPeerStream === 'function') {
+    room.onPeerStream((stream, peerId) => {
+      const peerProfile = getSenderDisplayProfile(peerId);
+      attachSharedScreenStream(stream, `${peerProfile.alias} 正在分享屏幕 · 同步观看中`, false);
+    });
+  }
+}
+
+function handlePeerDeparture(peerId) {
+  if (!peerId) return;
+  connectedPeers.delete(peerId);
+  roomParticipants.delete(peerId);
+  updateConnectionStatusUI();
 }
 
 /**
- * 统一处理所有通道（WebRTC DataChannel / E2EE WSS / BroadcastChannel）收到的消息信封
+ * 统一处理所有通道收到的信封（含人数上限拦截、国风代号同步、后进房间历史同步、消息撤回/修改/已读、全员结束销毁）
  */
 function handleEnvelopePacket(packet) {
   if (!packet || packet.senderId === selfId || isSessionTerminated) return;
 
-  registerPeerConnected(packet.senderId);
+  // 1. 收到全员结束销毁指令或墓碑状态 -> 所有人立即退出到结束界面，并将房间链接标记为永久失效
+  if (packet.kind === 'terminate') {
+    if (activeRoomId) recordRoomBurnedInMemory(activeRoomId);
+    terminateAndBurnSession({ notifyPeer: false, mode: 'burned' });
+    return;
+  }
 
-  if (packet.kind === 'hello') {
-    broadcastEnvelopePacket({
-      kind: 'hello-ack',
-      senderId: selfId,
-      msgCount: messages.length
-    });
-    syncInMemoryHistoryToPeers();
-    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
-  } else if (packet.kind === 'hello-ack') {
-    if ((packet.msgCount === 0 || typeof packet.msgCount === 'undefined') && messages.length > 0) {
-      syncInMemoryHistoryToPeers();
+  if (packet.kind === 'room-state') {
+    if (packet.status === 'terminated') {
+      if (activeRoomId) recordRoomBurnedInMemory(activeRoomId);
+      const isInitialJoin = connectedPeers.size === 0 && messages.length === 0;
+      terminateAndBurnSession({ notifyPeer: false, mode: isInitialJoin ? 'expired' : 'burned' });
+      return;
     }
-    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+    if (typeof packet.maxCapacity === 'number' && packet.maxCapacity >= 2 && packet.maxCapacity <= 5) {
+      maxRoomCapacity = packet.maxCapacity;
+      if (maxPeersSelectEl) maxPeersSelectEl.value = String(maxRoomCapacity);
+      updateConnectionStatusUI();
+    }
+    return;
+  }
+
+  // 2. 收到针对本客户端的“房间人数已满”拒绝通知 -> 立即退出并提示无法加入
+  if (packet.kind === 'room-full') {
+    if (!packet.targetPeerId || packet.targetPeerId === selfId) {
+      terminateAndBurnSession({
+        notifyPeer: false,
+        mode: 'full',
+        maxCap: packet.maxCapacity || maxRoomCapacity
+      });
+    }
+    return;
+  }
+
+  // 3. 处理对端握手与人数上限门禁校验
+  if (packet.kind === 'hello' || packet.kind === 'hello-ack') {
+    if (typeof packet.maxCapacity === 'number' && packet.maxCapacity >= 2 && packet.maxCapacity <= 5) {
+      // 采纳更早进入房间者（房主）设定的上限
+      if ((packet.joinedAt || 0) < selfJoinedAt) {
+        maxRoomCapacity = packet.maxCapacity;
+        if (maxPeersSelectEl) maxPeersSelectEl.value = String(maxRoomCapacity);
+      }
+    }
+
+    const isExistingPeer = roomParticipants.has(packet.senderId);
+    if (!isExistingPeer) {
+      // 若当前房间人数已达到上限，且新来者晚于本房间现有成员，拒绝其加入
+      if (roomParticipants.size >= maxRoomCapacity) {
+        const latestAdmittedJoinTime = Math.max(
+          ...Array.from(roomParticipants.values()).map((p) => p.joinedAt || 0)
+        );
+        if ((packet.joinedAt || Date.now()) >= latestAdmittedJoinTime) {
+          broadcastEnvelopePacket({
+            kind: 'room-full',
+            senderId: selfId,
+            targetPeerId: packet.senderId,
+            maxCapacity: maxRoomCapacity
+          });
+          return;
+        }
+      }
+
+      // 若对方发来的已准入名单已满且不包含本端，说明本端是超员后进者，主动退出并提示无法加入
+      if (
+        Array.isArray(packet.admittedIds) &&
+        packet.admittedIds.length >= maxRoomCapacity &&
+        !packet.admittedIds.includes(selfId) &&
+        (packet.joinedAt || 0) < selfJoinedAt
+      ) {
+        terminateAndBurnSession({
+          notifyPeer: false,
+          mode: 'full',
+          maxCap: maxRoomCapacity
+        });
+        return;
+      }
+    }
+
+    // 准入该成员并登记其国风代号
+    admitAndRegisterPeer(packet.senderId, packet.profile, packet.joinedAt);
+
+    if (packet.kind === 'hello') {
+      broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
+      syncInMemoryHistoryToPeers();
+      acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+    } else {
+      if ((packet.msgCount === 0 || typeof packet.msgCount === 'undefined') && messages.length > 0) {
+        syncInMemoryHistoryToPeers();
+      }
+      acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+    }
+    return;
+  }
+
+  // 非准入成员的消息不予处理
+  if (!roomParticipants.has(packet.senderId)) {
+    if (roomParticipants.size >= maxRoomCapacity) {
+      broadcastEnvelopePacket({
+        kind: 'room-full',
+        senderId: selfId,
+        targetPeerId: packet.senderId,
+        maxCapacity: maxRoomCapacity
+      });
+      return;
+    }
+    admitAndRegisterPeer(packet.senderId, packet.profile, packet.joinedAt);
+  }
+
+  if (packet.kind === 'room-meta' && typeof packet.maxCapacity === 'number') {
+    maxRoomCapacity = Math.max(2, Math.min(5, packet.maxCapacity));
+    if (maxPeersSelectEl) maxPeersSelectEl.value = String(maxRoomCapacity);
+    updateConnectionStatusUI();
+    showToast(`房间人数上限已调整为 ${maxRoomCapacity} 人`);
+  } else if (packet.kind === 'profile-update' && packet.profile) {
+    admitAndRegisterPeer(packet.senderId, packet.profile, packet.joinedAt);
+    refreshAllMessagesInDOM();
   } else if (packet.kind === 'message' && packet.payload) {
     handleIncomingMessage(packet.payload);
   } else if (packet.kind === 'sync-history' && Array.isArray(packet.items)) {
@@ -318,24 +645,32 @@ function handleEnvelopePacket(packet) {
     applyMessageEditById(packet.payload.id, packet.payload.text, { notifyPeer: false });
   } else if (packet.kind === 'read' && Array.isArray(packet.payload?.ids)) {
     applyReadReceiptIds(packet.payload.ids);
-  } else if (packet.kind === 'terminate') {
-    terminateAndBurnSession({ notifyPeer: false });
   } else if (packet.kind === 'peer-leave') {
-    connectedPeers.delete(packet.senderId);
-    updateConnectionStatusUI();
+    handlePeerDeparture(packet.senderId);
   }
 }
 
-function registerPeerConnected(peerId) {
+function admitAndRegisterPeer(peerId, profile, joinedAt) {
   if (!peerId || peerId === selfId) return;
-  const wasEmpty = connectedPeers.size === 0;
-  const isNewPeer = !connectedPeers.has(peerId);
+  const wasConnected = connectedPeers.has(peerId);
   connectedPeers.add(peerId);
-  if (wasEmpty || isNewPeer) {
-    updateConnectionStatusUI();
-  }
-  if (wasEmpty) {
-    showToast('对方已加入房间，端到端私语通道已建立');
+
+  const fallback = pickInitialProfile(peerId);
+  roomParticipants.set(peerId, {
+    id: peerId,
+    alias: profile?.alias || fallback.alias,
+    color: profile?.color || fallback.color,
+    bg: profile?.bg || fallback.bg,
+    joinedAt: joinedAt || Date.now()
+  });
+
+  // 如果自己的默认代号与更早进房间的成员撞名，自动切换为下一个国风代号
+  resolveAliasCollisionIfNeeded();
+  updateConnectionStatusUI();
+
+  if (!wasConnected) {
+    const peerAlias = roomParticipants.get(peerId)?.alias || '对方';
+    showToast(`${peerAlias} 已加入私语房间 (${getAdmittedParticipantCount()}/${maxRoomCapacity})`);
   }
 }
 
@@ -350,7 +685,7 @@ function broadcastEnvelopePacket(packet) {
     }
   }
 
-  broadcastEncryptedWssPacket(packet);
+  broadcastEncryptedWssPacket(packet, { retain: false });
 
   if (localEphemeralBus) {
     try {
@@ -361,10 +696,6 @@ function broadcastEnvelopePacket(packet) {
   }
 }
 
-/**
- * 将当前内存中的 `messages` 历史同步给后进入房间的朋友
- * （解决创建者先发了消息、朋友随后才打开链接看不到此前消息的问题）
- */
 function syncInMemoryHistoryToPeers() {
   if (!activeRoomId || isSessionTerminated || messages.length === 0) return;
 
@@ -377,7 +708,10 @@ function syncInMemoryHistoryToPeers() {
     timestamp: m.timestamp,
     edited: Boolean(m.edited),
     revoked: Boolean(m.revoked),
-    originSenderId: m.originSenderId || (m.direction === 'sent' ? selfId : 'peer')
+    originSenderId: m.originSenderId || (m.direction === 'sent' ? selfId : 'peer'),
+    senderAlias: m.senderAlias || myProfile.alias,
+    senderColor: m.senderColor || myProfile.color,
+    senderBg: m.senderBg || myProfile.bg
   }));
 
   broadcastEnvelopePacket({
@@ -406,6 +740,9 @@ function handleIncomingHistorySync(items) {
         timestamp: item.timestamp || Date.now(),
         direction,
         originSenderId: item.originSenderId || 'peer',
+        senderAlias: item.senderAlias || '旅人',
+        senderColor: item.senderColor || '#3B6E6C',
+        senderBg: item.senderBg || 'rgba(59, 110, 108, 0.12)',
         read: direction === 'sent',
         readAckSent: false,
         edited: Boolean(item.edited),
@@ -432,7 +769,14 @@ function handleIncomingHistorySync(items) {
 }
 
 /**
- * 端到端加密（AES-GCM-256）零存储 WSS 跨网直连引擎（兼容国内/移动4G/5G/企业防火墙）
+ * ============================================================================
+ * 五、端到端加密（AES-GCM-256）WSS 通道与房间销毁永久墓碑机制
+ * ============================================================================
+ * 说明：
+ * - `liveTopic` (`retain=false`)：传输实时加密消息（零存储，绝不落盘）。
+ * - `stateTopic` (`retain=true`)：仅存储加密后的房间状态墓碑 `{ kind: 'room-state', status: 'terminated' }`。
+ *   当任何一人点击“结束并清除”后，WSS 节点保留该加密墓碑；此后任何人再次点击该旧链接，
+ *   连接瞬间即收到 `status: 'terminated'` 并被拦截在“连接已失效”页面。
  */
 function encodeMqttVarLength(len) {
   const out = [];
@@ -453,17 +797,18 @@ function buildMqttConnectPacket(clientId) {
   return new Uint8Array([0x10, ...encodeMqttVarLength(remLen), ...varHeader, ...payload]);
 }
 
-function buildMqttSubscribePacket(topic) {
+function buildMqttSubscribePacket(topic, packetId = 1) {
   const tBytes = new TextEncoder().encode(topic);
-  const body = [0x00, 0x01, tBytes.length >> 8, tBytes.length & 0xff, ...tBytes, 0x00];
+  const body = [packetId >> 8, packetId & 0xff, tBytes.length >> 8, tBytes.length & 0xff, ...tBytes, 0x00];
   return new Uint8Array([0x82, ...encodeMqttVarLength(body.length), ...body]);
 }
 
-function buildMqttPublishPacket(topic, utf8String) {
+function buildMqttPublishPacket(topic, utf8String, { retain = false } = {}) {
   const tBytes = new TextEncoder().encode(topic);
   const pBytes = new TextEncoder().encode(utf8String);
   const remLen = 2 + tBytes.length + pBytes.length;
-  const header = [0x30, ...encodeMqttVarLength(remLen), tBytes.length >> 8, tBytes.length & 0xff];
+  const firstByte = retain ? 0x31 : 0x30;
+  const header = [firstByte, ...encodeMqttVarLength(remLen), tBytes.length >> 8, tBytes.length & 0xff];
   const out = new Uint8Array(header.length + tBytes.length + pBytes.length);
   out.set(header, 0);
   out.set(tBytes, header.length);
@@ -473,7 +818,8 @@ function buildMqttPublishPacket(topic, utf8String) {
 
 function startE2eeZeroStorageWssBridge(roomId) {
   if (typeof WebSocket === 'undefined') return;
-  const topic = `siyu/v2/${APP_ID}/${roomId}`;
+  const liveTopic = `siyu/v2/${APP_ID}/${roomId}/live`;
+  const stateTopic = `siyu/v2/${APP_ID}/${roomId}/state`;
 
   for (const brokerUrl of PUBLIC_WSS_BROKERS) {
     try {
@@ -483,7 +829,8 @@ function startE2eeZeroStorageWssBridge(roomId) {
       const clientState = {
         ws,
         ready: false,
-        topic,
+        liveTopic,
+        stateTopic,
         pingTimer: null
       };
       e2eeWssClients.push(clientState);
@@ -516,13 +863,15 @@ function startE2eeZeroStorageWssBridge(roomId) {
 
           if (packetType === 0x20 && !clientState.ready) {
             clientState.ready = true;
-            ws.send(buildMqttSubscribePacket(topic));
+            // 先订阅房间状态墓碑频道，再订阅实时通信频道
+            ws.send(buildMqttSubscribePacket(stateTopic, 1));
+            ws.send(buildMqttSubscribePacket(liveTopic, 2));
             clientState.pingTimer = setInterval(() => {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(new Uint8Array([0xc0, 0x00]));
               }
             }, 25000);
-            broadcastEncryptedWssPacket({ kind: 'hello', senderId: selfId });
+            broadcastEncryptedWssPacket(buildHelloPacket('hello'), { retain: false });
           } else if (packetType === 0x30) {
             let pIdx = idx;
             const topicLen = (buf[pIdx] << 8) | buf[pIdx + 1];
@@ -547,13 +896,16 @@ function startE2eeZeroStorageWssBridge(roomId) {
         }
       };
     } catch {
-      // 忽略单个节点连接异常
+      // 忽略单个节点异常
     }
   }
 }
 
-async function broadcastEncryptedWssPacket(packet) {
-  const readyClients = e2eeWssClients.filter((c) => c.ready && c.ws.readyState === WebSocket.OPEN);
+async function broadcastEncryptedWssPacket(
+  packet,
+  { retain = false, targetClients = e2eeWssClients, keyPromise = roomCryptoKeyPromise } = {}
+) {
+  const readyClients = targetClients.filter((c) => c.ready && c.ws.readyState === WebSocket.OPEN);
   if (readyClients.length === 0) return;
 
   try {
@@ -561,18 +913,24 @@ async function broadcastEncryptedWssPacket(packet) {
     const maxSliceLen = 14000;
 
     if (plainJson.length <= maxSliceLen) {
-      const enc = await encryptRoomText(plainJson);
+      const enc = await encryptRoomText(plainJson, keyPromise);
       if (!enc) return;
-      const frameStr = JSON.stringify({ s: selfId, iv: enc.iv, ct: enc.ct });
+      const frameStr = JSON.stringify({
+        s: selfId,
+        allowSelf: Boolean(retain),
+        iv: enc.iv,
+        ct: enc.ct
+      });
       for (const c of readyClients) {
-        c.ws.send(buildMqttPublishPacket(c.topic, frameStr));
+        const topic = retain ? c.stateTopic : c.liveTopic;
+        c.ws.send(buildMqttPublishPacket(topic, frameStr, { retain }));
       }
     } else {
       const chunkId = createMessageId();
       const total = Math.ceil(plainJson.length / maxSliceLen);
       for (let i = 0; i < total; i++) {
         const slice = plainJson.slice(i * maxSliceLen, (i + 1) * maxSliceLen);
-        const enc = await encryptRoomText(slice);
+        const enc = await encryptRoomText(slice, keyPromise);
         if (!enc) return;
         const frameStr = JSON.stringify({
           s: selfId,
@@ -583,7 +941,7 @@ async function broadcastEncryptedWssPacket(packet) {
           ct: enc.ct
         });
         for (const c of readyClients) {
-          c.ws.send(buildMqttPublishPacket(c.topic, frameStr));
+          c.ws.send(buildMqttPublishPacket(c.liveTopic, frameStr, { retain: false }));
         }
       }
     }
@@ -595,13 +953,20 @@ async function broadcastEncryptedWssPacket(packet) {
 async function handleEncryptedWssFrame(rawFrameStr) {
   try {
     const frame = JSON.parse(rawFrameStr);
-    if (!frame || frame.s === selfId || !frame.iv || !frame.ct) return;
+    if (!frame || !frame.iv || !frame.ct) return;
+    if (frame.s === selfId && !frame.allowSelf) return;
 
     const decryptedSlice = await decryptRoomText(frame.iv, frame.ct);
     if (!decryptedSlice) return;
 
     if (!frame.cid) {
       const packet = JSON.parse(decryptedSlice);
+      if (packet.kind === 'room-state' && packet.status === 'terminated') {
+        if (activeRoomId) recordRoomBurnedInMemory(activeRoomId);
+        const isInitialJoin = connectedPeers.size === 0 && messages.length === 0;
+        terminateAndBurnSession({ notifyPeer: false, mode: isInitialJoin ? 'expired' : 'burned' });
+        return;
+      }
       handleEnvelopePacket(packet);
       return;
     }
@@ -626,40 +991,30 @@ async function handleEncryptedWssFrame(rawFrameStr) {
   }
 }
 
-/**
- * 更新顶部“已连接 / 等待对方加入”状态指示器
- */
 function updateConnectionStatusUI() {
+  const count = getAdmittedParticipantCount();
   const isConnected = connectedPeers.size > 0;
   if (isConnected) {
     connectionBadgeEl.classList.remove('status-waiting');
     connectionBadgeEl.classList.add('status-connected');
-    connectionStatusTextEl.textContent = '已连接';
+    connectionStatusTextEl.textContent = `已连接 (${count}/${maxRoomCapacity})`;
   } else {
     connectionBadgeEl.classList.remove('status-connected');
     connectionBadgeEl.classList.add('status-waiting');
-    connectionStatusTextEl.textContent = '等待对方加入';
+    connectionStatusTextEl.textContent = `等待对方加入 (${count}/${maxRoomCapacity})`;
   }
 }
 
 /**
  * ============================================================================
- * 四、消息收发（支持文字、图片、语音，参考盒子IM极简气泡，纯内存数组驻留）
+ * 六、消息收发、撤回、文字修改重刷、未读(×)/已读(✓)回执（纯内存 `messages` 数组驻留）
  * ============================================================================
- */
-
-/**
- * 生成单条消息唯一内存 ID（用于去重）
  */
 function createMessageId() {
   const rand = crypto.getRandomValues(new Uint32Array(2));
   return `${Date.now().toString(36)}-${rand[0].toString(36)}${rand[1].toString(36)}`;
 }
 
-/**
- * 广播消息至对端，并写入本地内存数组 `messages`
- * @param {Object} rawPayload - { type: 'text'|'image'|'voice', text?, mediaDataUrl?, duration?, timestamp }
- */
 function dispatchOutgoingMessage(rawPayload) {
   if (!activeRoomId || isSessionTerminated) return;
 
@@ -670,12 +1025,14 @@ function dispatchOutgoingMessage(rawPayload) {
     mediaDataUrl: rawPayload.mediaDataUrl || '',
     duration: rawPayload.duration || 0,
     timestamp: rawPayload.timestamp || Date.now(),
-    originSenderId: selfId
+    originSenderId: selfId,
+    senderAlias: myProfile.alias,
+    senderColor: myProfile.color,
+    senderBg: myProfile.bg
   };
 
   processedMessageIds.add(payload.id);
 
-  // 推入纯内存数组 `messages`（绝不写入 localStorage/sessionStorage/IndexedDB/Cookie）
   const localRecord = {
     ...payload,
     direction: 'sent',
@@ -686,7 +1043,6 @@ function dispatchOutgoingMessage(rawPayload) {
   messages.push(localRecord);
   renderSingleMessageToDOM(localRecord);
 
-  // 通过所有活跃通道（Trystero WebRTC + E2EE WSS + 内存通道）广播给对方
   broadcastEnvelopePacket({
     kind: 'message',
     senderId: selfId,
@@ -694,14 +1050,20 @@ function dispatchOutgoingMessage(rawPayload) {
   });
 }
 
-/**
- * 接收方处理对端发来的消息：推入内存 `messages` 数组并立即渲染到界面，同时触发已读回执
- */
 function handleIncomingMessage(payload) {
   if (!payload || isSessionTerminated) return;
   const msgId = payload.id || `${payload.timestamp}-${payload.text}`;
   if (processedMessageIds.has(msgId)) return;
   processedMessageIds.add(msgId);
+
+  const senderId = payload.originSenderId || 'peer';
+  if (senderId !== 'peer' && payload.senderAlias && !roomParticipants.has(senderId)) {
+    admitAndRegisterPeer(senderId, {
+      alias: payload.senderAlias,
+      color: payload.senderColor,
+      bg: payload.senderBg
+    });
+  }
 
   const receivedRecord = {
     id: msgId,
@@ -711,23 +1073,20 @@ function handleIncomingMessage(payload) {
     duration: payload.duration || 0,
     timestamp: payload.timestamp || Date.now(),
     direction: 'received',
-    originSenderId: payload.originSenderId || 'peer',
+    originSenderId: senderId,
+    senderAlias: payload.senderAlias || '旅人',
+    senderColor: payload.senderColor || '#3B6E6C',
+    senderBg: payload.senderBg || 'rgba(59, 110, 108, 0.12)',
     readAckSent: false,
     edited: false,
     revoked: false
   };
 
-  // 仅推入内存变量 messages = []
   messages.push(receivedRecord);
   renderSingleMessageToDOM(receivedRecord);
-
-  // 若当前页面处于可见状态，立即向发送方回传“已读”回执
   acknowledgeUnreadReceivedMessages();
 }
 
-/**
- * 向对方发送已读回执（包含本端已查看的接收消息 ID 列表）
- */
 function acknowledgeUnreadReceivedMessages({ forceResendAll = false } = {}) {
   if (!activeRoomId || isSessionTerminated) return;
   if (document.visibilityState === 'hidden') return;
@@ -749,9 +1108,6 @@ function acknowledgeUnreadReceivedMessages({ forceResendAll = false } = {}) {
   });
 }
 
-/**
- * 发送方收到对端发来的已读回执后，将对应消息更新为“已读”并刷新界面徽标
- */
 function applyReadReceiptIds(ids) {
   if (!Array.isArray(ids) || isSessionTerminated) return;
   const idSet = new Set(ids);
@@ -763,15 +1119,10 @@ function applyReadReceiptIds(ids) {
   }
 }
 
-/**
- * 撤回指定 ID 的消息（支持文字、图片、语音）：
- * 清空内存中该条消息的正文与媒体数据，并同步通知对端撤回
- */
 function revokeMessageById(msgId, { notifyPeer = true } = {}) {
   const msg = messages.find((m) => m.id === msgId);
   if (!msg || msg.revoked) return;
 
-  // 若正在预览该图片或播放该语音，先关闭
   if (msg.type === 'image' && lightboxImgEl.src && lightboxImgEl.src === msg.mediaDataUrl) {
     closeImageLightbox();
   }
@@ -779,7 +1130,6 @@ function revokeMessageById(msgId, { notifyPeer = true } = {}) {
     stopActiveAudioPlayback();
   }
 
-  // 从内存中抹除该条消息的具体内容
   msg.text = '';
   msg.mediaDataUrl = '';
   msg.duration = 0;
@@ -796,9 +1146,6 @@ function revokeMessageById(msgId, { notifyPeer = true } = {}) {
   }
 }
 
-/**
- * 修改指定 ID 的文字消息并同步刷新双端界面
- */
 function applyMessageEditById(msgId, newText, { notifyPeer = true } = {}) {
   const trimmed = (newText || '').trim();
   if (!trimmed) return;
@@ -819,9 +1166,6 @@ function applyMessageEditById(msgId, newText, { notifyPeer = true } = {}) {
   }
 }
 
-/**
- * 将内存消息渲染为极简气泡 DOM（包含已读/未读状态、文字修改与撤回按钮）
- */
 function renderSingleMessageToDOM(msg) {
   if (emptyChatHintEl && emptyChatHintEl.parentNode === messageListEl) {
     emptyChatHintEl.remove();
@@ -835,31 +1179,56 @@ function renderSingleMessageToDOM(msg) {
   messageListEl.scrollTop = messageListEl.scrollHeight;
 }
 
-/**
- * 局部刷新单条消息 DOM（用于撤回、文字修改保存、已读状态更新）
- */
 function refreshMessageRowInDOM(msg) {
   const rowEl = messageListEl.querySelector(`.msg-row[data-msg-id="${CSS.escape(msg.id)}"]`);
   if (!rowEl) return;
   populateMessageRowElement(rowEl, msg);
 }
 
+function refreshAllMessagesInDOM() {
+  for (const msg of messages) {
+    refreshMessageRowInDOM(msg);
+  }
+}
+
 /**
- * 填充单条消息行内容
+ * 渲染单条消息行：
+ * - 顶部显示方案A发言者国风代号小印章（多人聊天一目了然区分是谁说的）
+ * - 底部显示精致微图标：未读(×) / 已读(✓)、文字修改笔形图标、撤回弧形箭头图标
  */
 function populateMessageRowElement(rowEl, msg) {
   rowEl.replaceChildren();
+
+  const senderProfile = getSenderDisplayProfile(
+    msg.originSenderId,
+    msg.senderAlias,
+    msg.senderColor,
+    msg.senderBg
+  );
 
   if (msg.revoked) {
     rowEl.className = 'msg-row msg-is-revoked';
     const pillEl = document.createElement('div');
     pillEl.className = 'msg-revoked-pill';
-    pillEl.textContent = msg.direction === 'sent' ? '你撤回了一条私语' : '对方撤回了一条私语';
+    pillEl.textContent = msg.direction === 'sent'
+      ? `你（${senderProfile.alias}）撤回了一条私语`
+      : `${senderProfile.alias} 撤回了一条私语`;
     rowEl.appendChild(pillEl);
     return;
   }
 
   rowEl.className = `msg-row ${msg.direction === 'sent' ? 'msg-sent' : 'msg-received'}`;
+
+  // 方案A：发言人国风代号印章标签
+  const sealEl = document.createElement('div');
+  sealEl.className = 'msg-sender-seal';
+  sealEl.style.color = senderProfile.color;
+  sealEl.style.background = senderProfile.bg;
+  sealEl.innerHTML = `<span class="seal-dot" style="background:${senderProfile.color}"></span><span class="seal-name"></span>`;
+  sealEl.querySelector('.seal-name').textContent = msg.direction === 'sent'
+    ? `${senderProfile.alias} · 我`
+    : senderProfile.alias;
+  rowEl.appendChild(sealEl);
 
   const bubbleEl = document.createElement('div');
   bubbleEl.className = `msg-bubble msg-type-${msg.type || 'text'}`;
@@ -883,7 +1252,7 @@ function populateMessageRowElement(rowEl, msg) {
 
   rowEl.appendChild(bubbleEl);
 
-  // 气泡下方精致微图标工具栏（已读/未读双勾图标、已修改微图标、文字修改笔形图标、撤回弧形箭头图标）
+  // 气泡下方微图标栏（未读 × / 已读 ✓、修改、撤回）
   const metaBarEl = document.createElement('div');
   metaBarEl.className = 'msg-footer-meta';
 
@@ -902,23 +1271,22 @@ function populateMessageRowElement(rowEl, msg) {
   }
 
   if (msg.direction === 'sent') {
-    // 1. 已读 / 未读小图标徽标（未读：单勾图标；已读：双勾高亮图标）
+    // 1. 未读显示 ×，已读显示 ✓
     const readBadge = document.createElement('span');
     readBadge.className = `msg-read-badge ${msg.read ? 'is-read' : 'is-unread'}`;
-    readBadge.title = msg.read ? '已读' : '未读';
+    readBadge.title = msg.read ? '已读 (✓)' : '未读 (×)';
     readBadge.setAttribute('aria-label', msg.read ? '已读' : '未读');
     readBadge.dataset.readState = msg.read ? 'read' : 'unread';
     readBadge.innerHTML = msg.read
-      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-           <path d="M2 12.5l4.2 4.2L15.5 7.5" stroke-linecap="round" stroke-linejoin="round"/>
-           <path d="M8.5 12.5l4.2 4.2L22 7.5" stroke-linecap="round" stroke-linejoin="round"/>
-         </svg>`
-      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
            <path d="M5 12.5l4.5 4.5L19 7.5" stroke-linecap="round" stroke-linejoin="round"/>
+         </svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+           <path d="M7.5 7.5l9 9M16.5 7.5l-9 9" stroke-linecap="round" stroke-linejoin="round"/>
          </svg>`;
     metaBarEl.appendChild(readBadge);
 
-    // 2. 文字消息专属“修改”小图标按钮
+    // 2. 文字消息专属“修改”微图标按钮
     if (msg.type === 'text') {
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
@@ -935,7 +1303,7 @@ function populateMessageRowElement(rowEl, msg) {
       metaBarEl.appendChild(editBtn);
     }
 
-    // 3. 所有已发送消息（文字、图片、语音）均支持“撤回”小图标按钮
+    // 3. 所有已发送消息（文字、图片、语音）均支持“撤回”微图标按钮
     const revokeBtn = document.createElement('button');
     revokeBtn.type = 'button';
     revokeBtn.className = 'msg-action-btn msg-revoke-btn';
@@ -956,9 +1324,6 @@ function populateMessageRowElement(rowEl, msg) {
   }
 }
 
-/**
- * 打开文字消息气泡内联编辑器，修改后点击“保存刷新”或按 Enter 即刻同步双端
- */
 function openInlineTextEditor(rowEl, bubbleEl, msg) {
   bubbleEl.replaceChildren();
 
@@ -987,7 +1352,7 @@ function openInlineTextEditor(rowEl, bubbleEl, msg) {
   const commitEdit = () => {
     const updated = inputEl.value.trim();
     if (!updated) {
-      showToast('修改内容不能为空，若需删除请点击“撤回”');
+      showToast('修改内容不能为空，若需删除请点击撤回图标');
       return;
     }
     applyMessageEditById(msg.id, updated, { notifyPeer: true });
@@ -1017,8 +1382,79 @@ function openInlineTextEditor(rowEl, bubbleEl, msg) {
 }
 
 /**
- * 构建盒子IM风格的语音消息气泡（播放按钮 + 动态声波纹 + 秒数时长）
+ * ============================================================================
+ * 七、多媒体与“一起看 / 屏幕共享”功能
+ * ============================================================================
  */
+async function startScreenShareTogether() {
+  if (!activeRoomId || isSessionTerminated) return;
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+    showToast('当前浏览器环境不支持桌面或标签页屏幕共享');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true
+    });
+    stopScreenShareTogether();
+    localScreenStream = stream;
+
+    attachSharedScreenStream(stream, `${myProfile.alias}（你）正在共享屏幕 · 同步放映中`, true);
+
+    for (const room of activeRooms) {
+      if (typeof room.addStream === 'function') {
+        try {
+          room.addStream(stream);
+        } catch {
+          // 忽略单个房间异常
+        }
+      }
+    }
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.onended = () => {
+        stopScreenShareTogether();
+      };
+    }
+  } catch {
+    // 用户取消选择窗口时不报错
+  }
+}
+
+function attachSharedScreenStream(stream, titleText, isLocalSharer) {
+  if (!cinemaStageEl || !sharedScreenVideoEl) return;
+  cinemaTitleEl.textContent = titleText;
+  stopScreenShareBtn.classList.toggle('hidden', !isLocalSharer);
+  sharedScreenVideoEl.srcObject = stream;
+  sharedScreenVideoEl.muted = Boolean(isLocalSharer);
+  cinemaStageEl.classList.remove('hidden');
+}
+
+function stopScreenShareTogether() {
+  if (localScreenStream) {
+    for (const room of activeRooms) {
+      if (typeof room.removeStream === 'function') {
+        try {
+          room.removeStream(localScreenStream);
+        } catch {
+          // 忽略异常
+        }
+      }
+    }
+    localScreenStream.getTracks().forEach((track) => track.stop());
+    localScreenStream = null;
+  }
+  if (sharedScreenVideoEl) {
+    sharedScreenVideoEl.srcObject = null;
+  }
+  if (cinemaStageEl) {
+    cinemaStageEl.classList.add('hidden');
+  }
+}
+
 function createVoiceBubbleElement(audioSrc, durationSec) {
   const boxEl = document.createElement('div');
   boxEl.className = 'msg-voice-box';
@@ -1099,15 +1535,6 @@ function stopActiveAudioPlayback() {
   }
 }
 
-/**
- * ============================================================================
- * 五、多媒体处理：纯内存图片压缩与语音录制（绝不落盘）
- * ============================================================================
- */
-
-/**
- * 将用户选择或粘贴的图片在内存中缩放为轻量 DataURL 后通过 WebRTC 发送
- */
 function handleImageFile(file) {
   if (!file || !file.type.startsWith('image/')) {
     showToast('请选择有效的图片文件');
@@ -1119,7 +1546,7 @@ function handleImageFile(file) {
     const rawDataUrl = reader.result;
     const img = new Image();
     img.onload = () => {
-      const maxDim = 1080;
+      const maxDim = 960;
       let { width, height } = img;
       if (width > maxDim || height > maxDim) {
         if (width >= height) {
@@ -1137,8 +1564,7 @@ function handleImageFile(file) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
 
-      // 在内存中生成紧凑的图片编码以适应 WebRTC DataChannel 传输
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
       dispatchOutgoingMessage({
         type: 'image',
         mediaDataUrl: compressedDataUrl,
@@ -1150,9 +1576,6 @@ function handleImageFile(file) {
   reader.readAsDataURL(file);
 }
 
-/**
- * 启动语音私语录制（若当前设备无物理麦克风，自动提供内存声波合成兜底以便在任意环境验证）
- */
 async function startVoiceRecording() {
   if (!activeRoomId || isSessionTerminated) return;
 
@@ -1185,7 +1608,7 @@ async function startVoiceRecording() {
       mediaRecorder.start();
       return;
     } catch {
-      // 无麦克风硬件或未授予麦克风权限时，平滑切换为内存静音/轻柔声波合成模式
+      // 无物理麦克风或未授权时平滑切换为轻音私语模式
     }
   }
 
@@ -1193,10 +1616,6 @@ async function startVoiceRecording() {
   recordingModeLabelEl.textContent = '正在录制轻音私语...';
 }
 
-/**
- * 停止或取消语音录制
- * @param {boolean} shouldSend - true 则发送语音消息，false 则丢弃内存录音数据
- */
 function stopVoiceRecording(shouldSend) {
   if (recordingTimerInterval) {
     clearInterval(recordingTimerInterval);
@@ -1257,9 +1676,6 @@ function releaseRecordingStream() {
   }
 }
 
-/**
- * 在内存中合成一段柔和可播放的 PCM WAV 音频 DataURL（用于无麦克风设备发送语音气泡及播放）
- */
 function synthesizeGentleWhisperWavDataUrl(seconds = 2) {
   const sampleRate = 8000;
   const numSamples = sampleRate * Math.max(1, Math.min(seconds, 6));
@@ -1277,8 +1693,8 @@ function synthesizeGentleWhisperWavDataUrl(seconds = 2) {
   writeStr(8, 'WAVE');
   writeStr(12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // 单声道
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate * 2, true);
   view.setUint16(32, 2, true);
@@ -1303,22 +1719,21 @@ function synthesizeGentleWhisperWavDataUrl(seconds = 2) {
 
 /**
  * ============================================================================
- * 六、“结束并清除”按钮与 beforeunload 自动销毁兜底逻辑
+ * 八、“结束并清除”全员退出、原链接永久作废与 beforeunload 兜底
  * ============================================================================
- * 清理步骤：
- * 1. 若由本端主动点击“结束并清除”，先向房间对端发送 terminate 信号，确保双方界面同时销毁。
- * 2. 调用 `room.leave()` 离开 Trystero 房间（Trystero 会移除该房间的所有 actions 和 callbacks，断开 WebRTC）。
- * 3. 清空内存中的 `messages` 数组（`messages.length = 0; messages = []`）及去重集合。
- * 4. 释放所有内存 Blob URL，停止任何正在播放或录制的音频流。
- * 5. 将界面上的消息 DOM 节点全部移除（`messageListEl.replaceChildren()`）。
- * 6. 抹除地址栏中的 `#room=<房间ID>`，展示“对话已结束，痕迹已清除”终态。
  */
-function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) {
+function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silent = false } = {}) {
+  const closingRoomId = activeRoomId;
+  const closingKeyPromise = roomCryptoKeyPromise;
+  const closingWssClients = e2eeWssClients.slice();
+  const closingRooms = activeRooms.slice();
+  const closingP2pDispatchers = p2pDispatchers.slice();
+  const closingLocalBus = localEphemeralBus;
+
   if (presenceHeartbeatTimer) {
     clearInterval(presenceHeartbeatTimer);
     presenceHeartbeatTimer = null;
   }
-  // 停止录音与语音播放
   if (recordingTimerInterval) {
     clearInterval(recordingTimerInterval);
     recordingTimerInterval = null;
@@ -1328,57 +1743,157 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
       mediaRecorder.onstop = null;
       mediaRecorder.stop();
     } catch {
-      // 忽略停止异常
+      // 忽略异常
     }
   }
   mediaRecorder = null;
   releaseRecordingStream();
   stopActiveAudioPlayback();
+  stopScreenShareTogether();
 
-  // 通知对端同步销毁或离开
-  if (notifyPeer) {
-    broadcastEnvelopePacket({ kind: 'terminate', senderId: selfId });
+  if (burnRoom && closingRoomId) {
+    recordRoomBurnedInMemory(closingRoomId);
+    if (globalRegistryBus) {
+      try {
+        globalRegistryBus.postMessage({ kind: 'room-burned', roomId: closingRoomId });
+      } catch {
+        // 忽略异常
+      }
+    }
+  }
+
+  // 向所有在线成员发送实时结束指令或单人离开通知，并在 WSS 写入加密销毁墓碑
+  if (notifyPeer && closingRoomId) {
+    const outPacket = burnRoom
+      ? { kind: 'terminate', senderId: selfId, roomId: closingRoomId }
+      : { kind: 'peer-leave', senderId: selfId };
+
+    for (const sendFn of closingP2pDispatchers) {
+      try {
+        sendFn(outPacket);
+      } catch {
+        // 忽略异常
+      }
+    }
+    if (closingLocalBus) {
+      try {
+        closingLocalBus.postMessage(outPacket);
+      } catch {
+        // 忽略异常
+      }
+    }
+
+    // 异步加密发送实时通知 + Retain=1 房间销毁永久墓碑后再关闭底层套接字
+    (async () => {
+      await broadcastEncryptedWssPacket(outPacket, {
+        retain: false,
+        targetClients: closingWssClients,
+        keyPromise: closingKeyPromise
+      });
+      if (burnRoom) {
+        await broadcastEncryptedWssPacket(
+          {
+            kind: 'room-state',
+            status: 'terminated',
+            roomId: closingRoomId,
+            endedAt: Date.now()
+          },
+          {
+            retain: true,
+            targetClients: closingWssClients,
+            keyPromise: closingKeyPromise
+          }
+        );
+      }
+      setTimeout(() => {
+        for (const c of closingWssClients) {
+          if (c.pingTimer) clearInterval(c.pingTimer);
+          try {
+            c.ws.close();
+          } catch {
+            // 忽略异常
+          }
+        }
+        for (const r of closingRooms) {
+          try {
+            r.leave();
+          } catch {
+            // 忽略异常
+          }
+        }
+        if (closingLocalBus) {
+          try {
+            closingLocalBus.close();
+          } catch {
+            // 忽略异常
+          }
+        }
+      }, 220);
+    })();
   } else {
-    broadcastEnvelopePacket({ kind: 'peer-leave', senderId: selfId });
-  }
-
-  // 离开所有 Trystero P2P 房间
-  while (activeRooms.length > 0) {
-    const room = activeRooms.pop();
-    try {
-      room.leave();
-    } catch {
-      // 忽略退出异常
+    // 若无需通知对端（比如被动收到结束通知），也确保持久化写入一次 WSS 墓碑后关闭连接
+    if (burnRoom && closingRoomId) {
+      (async () => {
+        await broadcastEncryptedWssPacket(
+          {
+            kind: 'room-state',
+            status: 'terminated',
+            roomId: closingRoomId,
+            endedAt: Date.now()
+          },
+          {
+            retain: true,
+            targetClients: closingWssClients,
+            keyPromise: closingKeyPromise
+          }
+        );
+        setTimeout(() => {
+          for (const c of closingWssClients) {
+            if (c.pingTimer) clearInterval(c.pingTimer);
+            try {
+              c.ws.close();
+            } catch {
+              // 忽略异常
+            }
+          }
+        }, 180);
+      })();
+    } else {
+      for (const c of closingWssClients) {
+        if (c.pingTimer) clearInterval(c.pingTimer);
+        try {
+          c.ws.close();
+        } catch {
+          // 忽略异常
+        }
+      }
+    }
+    for (const r of closingRooms) {
+      try {
+        r.leave();
+      } catch {
+        // 忽略异常
+      }
+    }
+    if (closingLocalBus) {
+      try {
+        closingLocalBus.close();
+      } catch {
+        // 忽略异常
+      }
     }
   }
+
+  activeRooms = [];
   p2pDispatchers = [];
-
-  // 关闭所有 E2EE WSS 连接
-  while (e2eeWssClients.length > 0) {
-    const client = e2eeWssClients.pop();
-    if (client.pingTimer) clearInterval(client.pingTimer);
-    try {
-      client.ws.close();
-    } catch {
-      // 忽略异常
-    }
-  }
-
-  if (localEphemeralBus) {
-    try {
-      localEphemeralBus.close();
-    } catch {
-      // 忽略关闭异常
-    }
-    localEphemeralBus = null;
-  }
-
+  e2eeWssClients = [];
+  localEphemeralBus = null;
   activeRoomId = null;
   roomCryptoKeyPromise = null;
   connectedPeers.clear();
+  roomParticipants.clear();
   incomingChunkBuffer.clear();
 
-  // 释放内存中的临时 ObjectURL
   ephemeralObjectUrls.forEach((url) => {
     try {
       URL.revokeObjectURL(url);
@@ -1393,10 +1908,9 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
   messages = [];
   processedMessageIds.clear();
 
-  // 彻底移除界面上的全部消息 DOM 节点与灯箱预览
   if (messageListEl) {
     messageListEl.replaceChildren();
-    if ( silent && emptyChatHintEl ) {
+    if (silent && emptyChatHintEl) {
       messageListEl.appendChild(emptyChatHintEl);
     }
   }
@@ -1404,38 +1918,58 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
 }
 
 /**
- * 执行“结束并清除”并切换到“对话已结束，痕迹已清除”终态界面
+ * 切换至终态/拦截画面
+ * @param {Object} options
+ * @param {boolean} options.notifyPeer - 是否向房间内所有成员广播结束指令
+ * @param {'burned'|'expired'|'full'} options.mode
+ *   - 'burned' : 房间内任一成员点击“结束并清除”，所有人同步回到结束界面（“话已燃尽，一切随风去吧。”）
+ *   - 'expired': 点击了已经销毁失效的旧链接（提示“连接已失效”）
+ *   - 'full'   : 超过房间设定最大人数上限（提示“无法加入私语”）
  */
-function terminateAndBurnSession({ notifyPeer = true } = {}) {
+function terminateAndBurnSession({ notifyPeer = true, mode = 'burned', maxCap = maxRoomCapacity } = {}) {
   if (isSessionTerminated) return;
 
-  cleanupMemoryAndLeaveRoom({ notifyPeer, silent: false });
+  const shouldBurnRoom = mode === 'burned' || mode === 'expired';
+  cleanupMemoryAndLeaveRoom({
+    notifyPeer,
+    burnRoom: shouldBurnRoom,
+    silent: false
+  });
   isSessionTerminated = true;
 
-  // 清除 URL 中的 #room=<房间ID> 片段，防止历史回退残留
+  // 清除地址栏中的 #room=<房间ID> 片段
   history.replaceState(null, '', window.location.pathname + window.location.search);
 
-  // 展示“话已燃尽，一切随风去吧”画框终态画面
+  if (terminatedTitleEl && terminatedDescEl) {
+    if (mode === 'expired') {
+      terminatedTitleEl.textContent = '连接已失效';
+      terminatedDescEl.textContent = '该私语房间已结束销毁，此连接已失效，一切随风去吧。';
+      showToast('该私语连接已失效，无法进入');
+    } else if (mode === 'full') {
+      terminatedTitleEl.textContent = '无法加入私语';
+      terminatedDescEl.textContent = `当前房间人数已达上限（最多 ${maxCap} 人），无法加入。`;
+      showToast(`无法加入：房间人数已满（上限 ${maxCap} 人）`);
+    } else {
+      terminatedTitleEl.textContent = '私语';
+      terminatedDescEl.textContent = '话已燃尽，一切随风去吧。';
+    }
+  }
+
   document.body.classList.remove('in-chat-mode');
   landingViewEl.classList.add('hidden');
   chatViewEl.classList.add('hidden');
   terminatedViewEl.classList.remove('hidden');
 }
 
-/**
- * 监听 beforeunload 与 pagehide 事件（自动清理兜底）：
- * 在用户关闭标签页、刷新页面或跳转离开时，执行与“结束并清除”完全一致的内存与 DOM 销毁逻辑。
- */
 function handleBeforeUnloadCleanup() {
   if (activeRoomId && !isSessionTerminated) {
-    cleanupMemoryAndLeaveRoom({ notifyPeer: true, silent: true });
+    cleanupMemoryAndLeaveRoom({ notifyPeer: true, burnRoom: false, silent: true });
   }
 }
 
 window.addEventListener('beforeunload', handleBeforeUnloadCleanup);
 window.addEventListener('pagehide', handleBeforeUnloadCleanup);
 
-// 当用户切回标签页或聚焦窗口时，自动对当前未回执的接收消息发送“已读”回执
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     acknowledgeUnreadReceivedMessages();
@@ -1447,23 +1981,22 @@ window.addEventListener('focus', () => {
 
 /**
  * ============================================================================
- * 七、UI 交互事件绑定
+ * 九、UI 交互事件绑定
  * ============================================================================
  */
-
-// 1. 首页点击“点击我，开始私语吧”：生成高熵房间 ID 并进入房间
+// 1. 首页点击“点击我，开始私语吧”：生成全新高熵房间 ID 并作为创建者进入
 startWhisperBtn.addEventListener('click', () => {
   const newRoomId = generateHighEntropyRoomId();
-  enterRoom(newRoomId);
+  enterRoom(newRoomId, { isCreator: true });
 });
 
-// 2. 点击“复制链接”按钮
+// 2. 点击“复制链接”
 copyLinkBtn.addEventListener('click', async () => {
   const url = inviteLinkInputEl.value;
   if (!url) return;
   try {
     await navigator.clipboard.writeText(url);
-    showToast('私语链接已复制，发给对方即可点对点直连');
+    showToast(`私语链接已复制（当前上限 ${maxRoomCapacity} 人）`);
   } catch {
     inviteLinkInputEl.select();
     document.execCommand('copy');
@@ -1471,17 +2004,101 @@ copyLinkBtn.addEventListener('click', async () => {
   }
 });
 
-// 3. 显隐邀请链接栏
+// 3. 修改分享链接后的“人数上限”选择器（默认 2 人，最大 5 人）
+if (maxPeersSelectEl) {
+  maxPeersSelectEl.addEventListener('change', () => {
+    const selected = Math.max(2, Math.min(5, Number(maxPeersSelectEl.value) || 2));
+    const currentCount = getAdmittedParticipantCount();
+    if (selected < currentCount) {
+      maxPeersSelectEl.value = String(maxRoomCapacity);
+      showToast(`当前已有 ${currentCount} 人在线，上限不能低于当前人数`);
+      return;
+    }
+    maxRoomCapacity = selected;
+    updateConnectionStatusUI();
+    broadcastEnvelopePacket({
+      kind: 'room-meta',
+      senderId: selfId,
+      maxCapacity: maxRoomCapacity
+    });
+    broadcastEncryptedWssPacket(
+      {
+        kind: 'room-state',
+        status: 'active',
+        maxCapacity: maxRoomCapacity
+      },
+      { retain: true }
+    );
+    showToast(`已将房间最大人数设为 ${maxRoomCapacity} 人`);
+  });
+}
+
+// 4. 方案A：点击顶部国风代号印章修改自己的临时称呼
+if (selfAliasBtn && aliasEditBoxEl && aliasEditInputEl && aliasSaveBtn) {
+  selfAliasBtn.addEventListener('click', () => {
+    selfAliasBtn.classList.add('hidden');
+    aliasEditBoxEl.classList.remove('hidden');
+    aliasEditInputEl.value = myProfile.alias;
+    aliasEditInputEl.focus();
+    aliasEditInputEl.select();
+  });
+
+  const commitAliasChange = () => {
+    const nextAlias = aliasEditInputEl.value.trim().slice(0, 8);
+    aliasEditBoxEl.classList.add('hidden');
+    selfAliasBtn.classList.remove('hidden');
+    if (!nextAlias || nextAlias === myProfile.alias) return;
+
+    myProfile.alias = nextAlias;
+    myProfile.custom = true;
+    renderSelfAliasUI();
+
+    if (roomParticipants.has(selfId)) {
+      roomParticipants.set(selfId, {
+        ...roomParticipants.get(selfId),
+        alias: myProfile.alias
+      });
+    }
+    for (const msg of messages) {
+      if (msg.direction === 'sent') {
+        msg.senderAlias = myProfile.alias;
+      }
+    }
+    refreshAllMessagesInDOM();
+
+    broadcastEnvelopePacket({
+      kind: 'profile-update',
+      senderId: selfId,
+      profile: myProfile,
+      joinedAt: selfJoinedAt
+    });
+    showToast(`已将你的临时代号改为「${myProfile.alias}」`);
+  };
+
+  aliasSaveBtn.addEventListener('click', commitAliasChange);
+  aliasEditInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      commitAliasChange();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      aliasEditBoxEl.classList.add('hidden');
+      selfAliasBtn.classList.remove('hidden');
+    }
+  });
+}
+
+// 5. 显隐邀请链接栏
 toggleInviteBtn.addEventListener('click', () => {
   inviteBarEl.classList.toggle('hidden');
 });
 
-// 4. 点击“结束并清除”按钮：双端同步清空内存与 DOM，进入终态
+// 6. 点击“结束并清除”按钮：所有人同步结束退出，原房间连接彻底失效
 endAndClearBtn.addEventListener('click', () => {
-  terminateAndBurnSession({ notifyPeer: true });
+  terminateAndBurnSession({ notifyPeer: true, mode: 'burned' });
 });
 
-// 5. 终态页点击“返回首页，重新开始私语”
+// 7. 终态页点击“重新开始私语”返回首页
 backHomeBtn.addEventListener('click', () => {
   isSessionTerminated = false;
   terminatedViewEl.classList.add('hidden');
@@ -1492,7 +2109,7 @@ backHomeBtn.addEventListener('click', () => {
   }
 });
 
-// 6. 发送文字消息（回车或点击发送按钮）
+// 8. 发送文字消息
 function submitTextMessage() {
   const text = messageInputEl.value.trim();
   if (!text) return;
@@ -1514,7 +2131,7 @@ messageInputEl.addEventListener('keydown', (event) => {
   }
 });
 
-// 7. 发送图片消息（按钮选择、粘贴图片、拖拽图片）
+// 9. 发送图片消息
 imagePickBtn.addEventListener('click', () => {
   imageFileInput.value = '';
   imageFileInput.click();
@@ -1552,7 +2169,19 @@ chatViewEl.addEventListener('drop', (event) => {
   }
 });
 
-// 8. 语音录制控制
+// 10. 共享屏幕 / 一起看电影
+if (screenShareBtn) {
+  screenShareBtn.addEventListener('click', () => {
+    startScreenShareTogether();
+  });
+}
+if (stopScreenShareBtn) {
+  stopScreenShareBtn.addEventListener('click', () => {
+    stopScreenShareTogether();
+  });
+}
+
+// 11. 语音录制控制
 voiceRecordBtn.addEventListener('click', () => {
   startVoiceRecording();
 });
@@ -1565,7 +2194,7 @@ finishVoiceBtn.addEventListener('click', () => {
   stopVoiceRecording(true);
 });
 
-// 9. 图片预览灯箱
+// 12. 图片预览灯箱
 function openImageLightbox(src) {
   if (!src) return;
   lightboxImgEl.src = src;
@@ -1579,7 +2208,7 @@ function closeImageLightbox() {
 
 imageLightboxEl.addEventListener('click', closeImageLightbox);
 
-// 10. 极简 Toast 提示
+// 13. 极简 Toast 提示
 function showToast(text) {
   const item = document.createElement('div');
   item.className = 'toast-item';
@@ -1587,14 +2216,14 @@ function showToast(text) {
   toastContainerEl.appendChild(item);
   setTimeout(() => {
     item.remove();
-  }, 2400);
+  }, 2600);
 }
 
-// 11. 监听地址栏 #room= 变化（当用户直接粘贴另一个私语链接或点击浏览器前进后退时自动响应）
+// 14. 监听地址栏 #room= 变化
 window.addEventListener('hashchange', () => {
   const hashRoomId = parseRoomIdFromHash();
   if (hashRoomId && hashRoomId !== activeRoomId) {
-    enterRoom(hashRoomId);
+    enterRoom(hashRoomId, { isCreator: false });
   }
 });
 
@@ -1602,6 +2231,6 @@ window.addEventListener('hashchange', () => {
 (function bootstrap() {
   const initialRoomId = parseRoomIdFromHash();
   if (initialRoomId) {
-    enterRoom(initialRoomId);
+    enterRoom(initialRoomId, { isCreator: false });
   }
 })();

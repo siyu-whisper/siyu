@@ -82,6 +82,10 @@ export function joinRoom(config = {}, roomId = 'default') {
     if (typeof cb === 'function') peerLeaveCallbacks.add(cb);
   }
 
+  function addStream() {}
+  function removeStream() {}
+  function onPeerStream() {}
+
   function getPeers() {
     const result = {};
     for (const [id, p] of peers.entries()) {
@@ -122,6 +126,9 @@ export function joinRoom(config = {}, roomId = 'default') {
     makeAction,
     onPeerJoin,
     onPeerLeave,
+    addStream,
+    removeStream,
+    onPeerStream,
     getPeers,
     leave
   };
