@@ -28,6 +28,9 @@ const ephemeralObjectUrls = new Set();
 let activeRoom = null;
 let activeRoomId = null;
 let sendP2PMessage = null;
+let sendP2PRevoke = null;
+let sendP2PEdit = null;
+let sendP2PRead = null;
 let sendP2PTerminate = null;
 let localEphemeralBus = null;
 let connectedPeers = new Set();
@@ -166,17 +169,43 @@ function enterRoom(roomId) {
   const room = joinRoom({ appId: APP_ID }, roomId);
   activeRoom = room;
 
-  // 2. 使用 Trystero 的 makeAction('message') 创建端到端消息通道
+  // 2. 使用 Trystero 的 makeAction 创建端到端消息、撤回、修改、已读回执与销毁通道
   const [sendMsg, onMsg] = room.makeAction('message');
-  // 3. 创建双向同步销毁动作通道 makeAction('terminate')，实现一方点击结束、双方同时清屏
+  const [sendRevoke, onRevoke] = room.makeAction('revoke');
+  const [sendEdit, onEdit] = room.makeAction('edit');
+  const [sendRead, onRead] = room.makeAction('read');
   const [sendTerm, onTerm] = room.makeAction('terminate');
 
   sendP2PMessage = sendMsg;
+  sendP2PRevoke = sendRevoke;
+  sendP2PEdit = sendEdit;
+  sendP2PRead = sendRead;
   sendP2PTerminate = sendTerm;
 
-  // 监听对端通过 WebRTC 发来的消息
+  // 监听对端通过 WebRTC 发来的新消息
   onMsg((payload) => {
     handleIncomingMessage(payload);
+  });
+
+  // 监听对端发来的“撤回消息”指令（支持文字、图片、语音撤回）
+  onRevoke((payload) => {
+    if (payload && payload.id) {
+      revokeMessageById(payload.id, { notifyPeer: false });
+    }
+  });
+
+  // 监听对端发来的“修改文字消息”指令并实时刷新
+  onEdit((payload) => {
+    if (payload && payload.id && typeof payload.text === 'string') {
+      applyMessageEditById(payload.id, payload.text, { notifyPeer: false });
+    }
+  });
+
+  // 监听对端发来的“已读回执”
+  onRead((payload) => {
+    if (payload && Array.isArray(payload.ids)) {
+      applyReadReceiptIds(payload.ids);
+    }
   });
 
   // 监听对端发来的“结束并清除”指令
@@ -188,6 +217,7 @@ function enterRoom(roomId) {
   room.onPeerJoin((peerId) => {
     connectedPeers.add(peerId);
     updateConnectionStatusUI();
+    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
     showToast('对方已加入房间，端到端私语通道已建立');
   });
 
@@ -196,7 +226,7 @@ function enterRoom(roomId) {
     updateConnectionStatusUI();
   });
 
-  // 4. 同源内存瞬态通道辅助（纯内存 IPC，不写任何磁盘/Storage，确保受限内网或同浏览器双标签秒级互通）
+  // 3. 同源内存瞬态通道辅助（纯内存 IPC，不写任何磁盘/Storage，确保受限内网或同浏览器双标签秒级互通）
   if (typeof BroadcastChannel !== 'undefined') {
     const bus = new BroadcastChannel(`siyu_ephemeral_${APP_ID}_${roomId}`);
     localEphemeralBus = bus;
@@ -210,6 +240,7 @@ function enterRoom(roomId) {
         connectedPeers.add(packet.senderId);
         updateConnectionStatusUI();
         bus.postMessage({ kind: 'hello-ack', senderId: selfId });
+        acknowledgeUnreadReceivedMessages({ forceResendAll: true });
         if (isNew) {
           showToast('对方已加入房间，端到端私语通道已建立');
         }
@@ -217,11 +248,18 @@ function enterRoom(roomId) {
         const isNew = !connectedPeers.has(packet.senderId);
         connectedPeers.add(packet.senderId);
         updateConnectionStatusUI();
+        acknowledgeUnreadReceivedMessages({ forceResendAll: true });
         if (isNew) {
           showToast('对方已加入房间，端到端私语通道已建立');
         }
       } else if (packet.kind === 'message' && packet.payload) {
         handleIncomingMessage(packet.payload);
+      } else if (packet.kind === 'revoke' && packet.payload?.id) {
+        revokeMessageById(packet.payload.id, { notifyPeer: false });
+      } else if (packet.kind === 'edit' && packet.payload?.id) {
+        applyMessageEditById(packet.payload.id, packet.payload.text, { notifyPeer: false });
+      } else if (packet.kind === 'read' && Array.isArray(packet.payload?.ids)) {
+        applyReadReceiptIds(packet.payload.ids);
       } else if (packet.kind === 'terminate') {
         terminateAndBurnSession({ notifyPeer: false });
       } else if (packet.kind === 'peer-leave') {
@@ -287,7 +325,10 @@ function dispatchOutgoingMessage(rawPayload) {
   // 推入纯内存数组 `messages`（绝不写入 localStorage/sessionStorage/IndexedDB/Cookie）
   const localRecord = {
     ...payload,
-    direction: 'sent'
+    direction: 'sent',
+    read: false,
+    edited: false,
+    revoked: false
   };
   messages.push(localRecord);
   renderSingleMessageToDOM(localRecord);
@@ -316,7 +357,7 @@ function dispatchOutgoingMessage(rawPayload) {
 }
 
 /**
- * 接收方处理对端发来的消息：推入内存 `messages` 数组并立即渲染到界面
+ * 接收方处理对端发来的消息：推入内存 `messages` 数组并立即渲染到界面，同时触发已读回执
  */
 function handleIncomingMessage(payload) {
   if (!payload || isSessionTerminated) return;
@@ -331,16 +372,158 @@ function handleIncomingMessage(payload) {
     mediaDataUrl: payload.mediaDataUrl || '',
     duration: payload.duration || 0,
     timestamp: payload.timestamp || Date.now(),
-    direction: 'received'
+    direction: 'received',
+    readAckSent: false,
+    edited: false,
+    revoked: false
   };
 
   // 仅推入内存变量 messages = []
   messages.push(receivedRecord);
   renderSingleMessageToDOM(receivedRecord);
+
+  // 若当前页面处于可见状态，立即向发送方回传“已读”回执
+  acknowledgeUnreadReceivedMessages();
 }
 
 /**
- * 将内存消息渲染为盒子IM风格极简气泡 DOM（无头像、无昵称、无冗余时间戳分组）
+ * 向对方发送已读回执（包含本端已查看的接收消息 ID 列表）
+ */
+function acknowledgeUnreadReceivedMessages({ forceResendAll = false } = {}) {
+  if (!activeRoomId || isSessionTerminated) return;
+  if (document.visibilityState === 'hidden') return;
+
+  const idsToAck = [];
+  for (const msg of messages) {
+    if (msg.direction === 'received' && !msg.revoked && (forceResendAll || !msg.readAckSent)) {
+      msg.readAckSent = true;
+      idsToAck.push(msg.id);
+    }
+  }
+
+  if (idsToAck.length === 0) return;
+
+  const receiptPayload = { ids: idsToAck, readAt: Date.now() };
+  if (typeof sendP2PRead === 'function') {
+    try {
+      sendP2PRead(receiptPayload);
+    } catch {
+      // 忽略单通道瞬时异常
+    }
+  }
+  if (localEphemeralBus) {
+    try {
+      localEphemeralBus.postMessage({
+        kind: 'read',
+        senderId: selfId,
+        payload: receiptPayload
+      });
+    } catch {
+      // 忽略异常
+    }
+  }
+}
+
+/**
+ * 发送方收到对端发来的已读回执后，将对应消息更新为“已读”并刷新界面徽标
+ */
+function applyReadReceiptIds(ids) {
+  if (!Array.isArray(ids) || isSessionTerminated) return;
+  const idSet = new Set(ids);
+  for (const msg of messages) {
+    if (msg.direction === 'sent' && idSet.has(msg.id) && !msg.read) {
+      msg.read = true;
+      refreshMessageRowInDOM(msg);
+    }
+  }
+}
+
+/**
+ * 撤回指定 ID 的消息（支持文字、图片、语音）：
+ * 清空内存中该条消息的正文与媒体数据，并同步通知对端撤回
+ */
+function revokeMessageById(msgId, { notifyPeer = true } = {}) {
+  const msg = messages.find((m) => m.id === msgId);
+  if (!msg || msg.revoked) return;
+
+  // 若正在预览该图片或播放该语音，先关闭
+  if (msg.type === 'image' && lightboxImgEl.src && lightboxImgEl.src === msg.mediaDataUrl) {
+    closeImageLightbox();
+  }
+  if (msg.type === 'voice') {
+    stopActiveAudioPlayback();
+  }
+
+  // 从内存中抹除该条消息的具体内容
+  msg.text = '';
+  msg.mediaDataUrl = '';
+  msg.duration = 0;
+  msg.revoked = true;
+
+  refreshMessageRowInDOM(msg);
+
+  if (notifyPeer) {
+    const payload = { id: msgId, revokedAt: Date.now() };
+    if (typeof sendP2PRevoke === 'function') {
+      try {
+        sendP2PRevoke(payload);
+      } catch {
+        // 忽略异常
+      }
+    }
+    if (localEphemeralBus) {
+      try {
+        localEphemeralBus.postMessage({
+          kind: 'revoke',
+          senderId: selfId,
+          payload
+        });
+      } catch {
+        // 忽略异常
+      }
+    }
+  }
+}
+
+/**
+ * 修改指定 ID 的文字消息并同步刷新双端界面
+ */
+function applyMessageEditById(msgId, newText, { notifyPeer = true } = {}) {
+  const trimmed = (newText || '').trim();
+  if (!trimmed) return;
+
+  const msg = messages.find((m) => m.id === msgId);
+  if (!msg || msg.revoked || msg.type !== 'text') return;
+
+  msg.text = trimmed;
+  msg.edited = true;
+  refreshMessageRowInDOM(msg);
+
+  if (notifyPeer) {
+    const payload = { id: msgId, text: trimmed, editedAt: Date.now() };
+    if (typeof sendP2PEdit === 'function') {
+      try {
+        sendP2PEdit(payload);
+      } catch {
+        // 忽略异常
+      }
+    }
+    if (localEphemeralBus) {
+      try {
+        localEphemeralBus.postMessage({
+          kind: 'edit',
+          senderId: selfId,
+          payload
+        });
+      } catch {
+        // 忽略异常
+      }
+    }
+  }
+}
+
+/**
+ * 将内存消息渲染为极简气泡 DOM（包含已读/未读状态、文字修改与撤回按钮）
  */
 function renderSingleMessageToDOM(msg) {
   if (emptyChatHintEl && emptyChatHintEl.parentNode === messageListEl) {
@@ -348,8 +531,38 @@ function renderSingleMessageToDOM(msg) {
   }
 
   const rowEl = document.createElement('div');
-  rowEl.className = `msg-row ${msg.direction === 'sent' ? 'msg-sent' : 'msg-received'}`;
   rowEl.dataset.msgId = msg.id;
+  populateMessageRowElement(rowEl, msg);
+
+  messageListEl.appendChild(rowEl);
+  messageListEl.scrollTop = messageListEl.scrollHeight;
+}
+
+/**
+ * 局部刷新单条消息 DOM（用于撤回、文字修改保存、已读状态更新）
+ */
+function refreshMessageRowInDOM(msg) {
+  const rowEl = messageListEl.querySelector(`.msg-row[data-msg-id="${CSS.escape(msg.id)}"]`);
+  if (!rowEl) return;
+  populateMessageRowElement(rowEl, msg);
+}
+
+/**
+ * 填充单条消息行内容
+ */
+function populateMessageRowElement(rowEl, msg) {
+  rowEl.replaceChildren();
+
+  if (msg.revoked) {
+    rowEl.className = 'msg-row msg-is-revoked';
+    const pillEl = document.createElement('div');
+    pillEl.className = 'msg-revoked-pill';
+    pillEl.textContent = msg.direction === 'sent' ? '你撤回了一条私语' : '对方撤回了一条私语';
+    rowEl.appendChild(pillEl);
+    return;
+  }
+
+  rowEl.className = `msg-row ${msg.direction === 'sent' ? 'msg-sent' : 'msg-received'}`;
 
   const bubbleEl = document.createElement('div');
   bubbleEl.className = `msg-bubble msg-type-${msg.type || 'text'}`;
@@ -372,8 +585,107 @@ function renderSingleMessageToDOM(msg) {
   }
 
   rowEl.appendChild(bubbleEl);
-  messageListEl.appendChild(rowEl);
-  messageListEl.scrollTop = messageListEl.scrollHeight;
+
+  // 气泡下方元信息栏（已读/未读、已修改标记、文字修改按钮、撤回按钮）
+  const metaBarEl = document.createElement('div');
+  metaBarEl.className = 'msg-footer-meta';
+
+  if (msg.edited) {
+    const editedTag = document.createElement('span');
+    editedTag.className = 'msg-edited-tag';
+    editedTag.textContent = '已修改';
+    metaBarEl.appendChild(editedTag);
+  }
+
+  if (msg.direction === 'sent') {
+    // 1. 已读 / 未读状态徽标
+    const readBadge = document.createElement('span');
+    readBadge.className = `msg-read-badge ${msg.read ? 'is-read' : 'is-unread'}`;
+    readBadge.textContent = msg.read ? '已读' : '未读';
+    metaBarEl.appendChild(readBadge);
+
+    // 2. 文字消息专属“修改”按钮
+    if (msg.type === 'text') {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'msg-action-btn msg-edit-btn';
+      editBtn.textContent = '修改';
+      editBtn.addEventListener('click', () => openInlineTextEditor(rowEl, bubbleEl, msg));
+      metaBarEl.appendChild(editBtn);
+    }
+
+    // 3. 所有已发送消息（文字、图片、语音）均支持“撤回”按钮
+    const revokeBtn = document.createElement('button');
+    revokeBtn.type = 'button';
+    revokeBtn.className = 'msg-action-btn msg-revoke-btn';
+    revokeBtn.textContent = '撤回';
+    revokeBtn.addEventListener('click', () => revokeMessageById(msg.id, { notifyPeer: true }));
+    metaBarEl.appendChild(revokeBtn);
+  }
+
+  if (metaBarEl.children.length > 0) {
+    rowEl.appendChild(metaBarEl);
+  }
+}
+
+/**
+ * 打开文字消息气泡内联编辑器，修改后点击“保存刷新”或按 Enter 即刻同步双端
+ */
+function openInlineTextEditor(rowEl, bubbleEl, msg) {
+  bubbleEl.replaceChildren();
+
+  const editorWrap = document.createElement('div');
+  editorWrap.className = 'msg-inline-editor';
+
+  const inputEl = document.createElement('input');
+  inputEl.type = 'text';
+  inputEl.className = 'msg-inline-input';
+  inputEl.value = msg.text;
+  inputEl.maxLength = 4000;
+
+  const actionsEl = document.createElement('div');
+  actionsEl.className = 'msg-inline-actions';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'msg-inline-cancel';
+  cancelBtn.textContent = '取消';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'msg-inline-save';
+  saveBtn.textContent = '保存刷新';
+
+  const commitEdit = () => {
+    const updated = inputEl.value.trim();
+    if (!updated) {
+      showToast('修改内容不能为空，若需删除请点击“撤回”');
+      return;
+    }
+    applyMessageEditById(msg.id, updated, { notifyPeer: true });
+  };
+
+  cancelBtn.addEventListener('click', () => refreshMessageRowInDOM(msg));
+  saveBtn.addEventListener('click', commitEdit);
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      commitEdit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      refreshMessageRowInDOM(msg);
+    }
+  });
+
+  actionsEl.appendChild(cancelBtn);
+  actionsEl.appendChild(saveBtn);
+  editorWrap.appendChild(inputEl);
+  editorWrap.appendChild(actionsEl);
+  bubbleEl.appendChild(editorWrap);
+
+  inputEl.focus();
+  inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 }
 
 /**
@@ -735,6 +1047,9 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, silent = false } = {}) 
   }
 
   sendP2PMessage = null;
+  sendP2PRevoke = null;
+  sendP2PEdit = null;
+  sendP2PRead = null;
   sendP2PTerminate = null;
   activeRoomId = null;
   connectedPeers.clear();
@@ -795,6 +1110,16 @@ function handleBeforeUnloadCleanup() {
 
 window.addEventListener('beforeunload', handleBeforeUnloadCleanup);
 window.addEventListener('pagehide', handleBeforeUnloadCleanup);
+
+// 当用户切回标签页或聚焦窗口时，自动对当前未回执的接收消息发送“已读”回执
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    acknowledgeUnreadReceivedMessages();
+  }
+});
+window.addEventListener('focus', () => {
+  acknowledgeUnreadReceivedMessages();
+});
 
 /**
  * ============================================================================

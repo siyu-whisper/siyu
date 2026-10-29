@@ -8,16 +8,16 @@
 
 ```text
 siyu/
-├── index.html                   # 页面入口（首页、聊天视图、终态销毁视图）
-├── main.js                      # 核心 P2P 逻辑（Trystero + 内存数组 + 多媒体收发 + 双向销毁）
-├── style.css                    # 极简雪原迷雾意境与盒子IM风格气泡样式
+├── index.html                   # 页面入口（画廊相框首页、聊天视图、终态销毁视图）
+├── main.js                      # 核心 P2P 逻辑（消息收发、撤回、文字修改重刷、已读回执、双向销毁）
+├── style.css                    # 中国风对撞色（#494266 × #E9E8EF）与画廊相框极简样式
 ├── package.json                 # 依赖与构建脚本（trystero + vite，MIT 协议）
 ├── vite.config.js               # Vite 构建与 GitHub Pages base 路径配置
 ├── LICENSE                      # MIT 开源许可证
 ├── .gitignore                   # Git 忽略规则（忽略 node_modules/ 与 dist/）
 ├── public/
-│   ├── logo.svg                 # 私语专属极简小 Logo（双人秋千与耳语声波）
-│   └── snow-swing-bg.svg        # 苍茫雪原与浓雾中的双人秋千背景矢量画卷
+│   ├── logo.svg                 # 私语专属 L1 极简折页耳语 Logo
+│   └── hero-couple.jpg          # 首页中央相框画芯（长椅旧报私语）
 └── .github/workflows/deploy.yml # GitHub Actions 自动构建并推送到 gh-pages 分支
 ```
 

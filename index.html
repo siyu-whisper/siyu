@@ -16,40 +16,30 @@
   </script>
 </head>
 <body>
-  <!-- 全屏意境背景层：苍茫雪原与浓雾中的双人秋千 -->
+  <!-- 柔和国风底纹层（#E9E8EF 云水灰白 × #494266 暮山黛紫微光） -->
   <div class="ambient-backdrop" aria-hidden="true">
-    <div class="ambient-photo"></div>
     <div class="ambient-mist"></div>
   </div>
 
   <main class="app-shell">
-    <!-- ==================== 1. 网站首页（未进入房间时展示） ==================== -->
+    <!-- ==================== 1. 网站首页（极简三段式相框装裱构图） ==================== -->
     <section id="landing-view" class="view-panel landing-panel" aria-label="私语首页">
       <div class="landing-card">
-        <div class="brand-header">
-          <!-- 私语专属极简小 Logo（双人秋千 + 耳语声波印章） -->
-          <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="56" height="56" />
-          <div class="brand-title-group">
-            <h1 class="brand-title">私语</h1>
-            <p class="brand-subtitle">天地茫茫，唯你我耳语 · 打开即聊，聊完即焚</p>
+        <!-- 顶部：L1 折页耳语图标 + 私语 + S3 Slogan（无外框极简居中） -->
+        <header class="brand-header">
+          <img src="./logo.svg" alt="私语 Logo" class="brand-logo-lg" width="48" height="48" />
+          <h1 class="brand-title">私语</h1>
+          <p class="brand-subtitle">有些话不必惊动世界，读完便融进风里。</p>
+        </header>
+
+        <!-- 中央：画廊装裱相框 + 图2旧报长椅私语画芯 -->
+        <div class="gallery-frame">
+          <div class="gallery-artwork-wrap">
+            <img src="./hero-couple.jpg" alt="长椅旧报私语" class="gallery-artwork-img" />
           </div>
         </div>
 
-        <div class="privacy-pillars" role="list" aria-label="隐私保障原则">
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>WebRTC 点对点加密直连，不经任何应用服务器</span>
-          </div>
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>纯内存驻留（<code>let messages = []</code>），零本地存储写入</span>
-          </div>
-          <div class="pillar-item" role="listitem">
-            <span class="pillar-dot"></span>
-            <span>点击结束或关闭页面即刻双向清空，旧链接随即作废</span>
-          </div>
-        </div>
-
+        <!-- 底部：黛紫对撞色开启按钮 -->
         <div class="landing-actions">
           <button id="start-whisper-btn" type="button" class="primary-whisper-btn">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -59,10 +49,6 @@
             <span>点击我，开始私语吧</span>
           </button>
         </div>
-
-        <p class="landing-footnote">
-          房间凭证仅存于 URL 的 <code>#room=</code> 片段中，按 HTTP 规范绝不会发送至任何服务端
-        </p>
       </div>
     </section>
 
@@ -112,11 +98,11 @@
         </div>
       </div>
 
-      <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音） -->
+      <!-- 极简消息列表区域（参考盒子IM气泡样式，区分自己/对方，支持文字、图片、语音、撤回、文字编辑与已读回执） -->
       <div id="message-list" class="message-list" role="log" aria-live="polite">
         <div id="empty-chat-hint" class="empty-chat-hint">
           <p>消息仅驻留于当前内存，支持发送文字、图片与语音</p>
-          <p class="empty-sub">无头像 · 无昵称 · 关闭或点击“结束并清除”即刻双端销毁</p>
+          <p class="empty-sub">支持已读/未读状态、消息撤回、文字修改重刷 · 点击“结束并清除”即刻双端销毁</p>
         </div>
       </div>
 
