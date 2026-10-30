@@ -290,16 +290,32 @@
             </button>
           </div>
 
-          <!-- 文字输入框 -->
-          <input
-            id="message-input"
-            type="text"
-            class="message-input"
-            placeholder="写下一句私语，回车发送（支持直接粘贴图片）..."
-            autocomplete="off"
-            spellcheck="false"
-            maxlength="4000"
-          />
+          <!-- 文字输入框与右侧内嵌 Emoji 表情包选择器 -->
+          <div id="message-input-wrap" class="message-input-wrap">
+            <input
+              id="message-input"
+              type="text"
+              class="message-input"
+              placeholder="写下一句私语，回车发送（支持直接粘贴图片）..."
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="4000"
+            />
+            <button id="emoji-toggle-btn" type="button" class="emoji-toggle-btn" title="选择 Emoji 表情" aria-label="选择表情" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="9.5"/>
+                <path d="M8.2 14.2c.9 1.6 2.2 2.4 3.8 2.4s2.9-.8 3.8-2.4" stroke-linecap="round"/>
+                <circle cx="9" cy="10" r="1.1" fill="currentColor" stroke="none"/>
+                <circle cx="15" cy="10" r="1.1" fill="currentColor" stroke="none"/>
+              </svg>
+            </button>
+
+            <!-- Emoji 表情包浮层面板 -->
+            <div id="emoji-picker-popover" class="emoji-picker-popover hidden" role="dialog" aria-label="Emoji 表情包">
+              <div id="emoji-tabs-bar" class="emoji-tabs-bar" role="tablist"></div>
+              <div id="emoji-grid" class="emoji-grid"></div>
+            </div>
+          </div>
 
           <!-- 发送按钮 -->
           <button id="send-msg-btn" type="button" class="send-msg-btn">

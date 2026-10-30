@@ -190,7 +190,12 @@ const videoPickBtn = document.getElementById('video-pick-btn');
 const videoFileInput = document.getElementById('video-file-input');
 const voiceCallBtn = document.getElementById('voice-call-btn');
 const videoCallBtn = document.getElementById('video-call-btn');
+const messageInputWrapEl = document.getElementById('message-input-wrap');
 const messageInputEl = document.getElementById('message-input');
+const emojiToggleBtn = document.getElementById('emoji-toggle-btn');
+const emojiPickerPopoverEl = document.getElementById('emoji-picker-popover');
+const emojiTabsBarEl = document.getElementById('emoji-tabs-bar');
+const emojiGridEl = document.getElementById('emoji-grid');
 const sendMsgBtn = document.getElementById('send-msg-btn');
 
 const recordingTimerEl = document.getElementById('recording-timer');
@@ -2593,6 +2598,7 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
       messageListEl.appendChild(emptyChatHintEl);
     }
   }
+  closeEmojiPicker();
   closeImageLightbox();
 }
 
@@ -2788,11 +2794,155 @@ backHomeBtn.addEventListener('click', () => {
   }
 });
 
-// 8. 发送文字消息
+// 8. 发送文字消息与 Emoji 表情包选择
+const EMOJI_PACK_CATEGORIES = [
+  {
+    key: 'mood',
+    label: '心绪',
+    emojis: [
+      '😊', '🥰', '😘', '🥹', '😉', '🤭', '😌', '🤗',
+      '🥲', '🥺', '😭', '🤫', '🤔', '🫡', '😶‍🌫️', '😴',
+      '🥳', '🤩', '😎', '🫠', '🫣', '😮‍💨', '😏', '😇',
+      '🙃', '😋', '😜', '🤪', '🤨', '😔', '😣', '😤'
+    ]
+  },
+  {
+    key: 'love',
+    label: '爱意',
+    emojis: [
+      '❤️', '🩷', '🧡', '💛', '💚', '💙', '💜', '🤍',
+      '💖', '💗', '💓', '💞', '💕', '💌', '🫂', '💋',
+      '🌹', '🌷', '🌸', '🌺', '🌻', '🌼', '💐', '🍀',
+      '✨', '🌟', '💫', '🫧', '🎀', '🧸', '🎈', '🎁'
+    ]
+  },
+  {
+    key: 'oriental',
+    label: '国风',
+    emojis: [
+      '🎐', '🏮', '🍵', '🎋', '🌙', '🌕', '⭐', '🌌',
+      '☁️', '🌧️', '❄️', '🌊', '🔥', '🍂', '🍁', '🍃',
+      '🦋', '🕊️', '🦢', '🦌', '🐇', '🦊', '🐼', '🐉',
+      '🏔️', '🏞️', '⛩️', '🪭', '🪕', '🕯️', '📜', '🖋️'
+    ]
+  },
+  {
+    key: 'gesture',
+    label: '互动',
+    emojis: [
+      '👋', '🤚', '🫶', '🤝', '👍', '👏', '🙏', '✌️',
+      '🤞', '🤟', '👌', '🤌', '🤙', '👈', '👉', '👆',
+      '💪', '👀', '👂', '💬', '💭', '💯', '🆗', '🎉',
+      '🥂', '🍷', '☕', '🍰', '🍓', '🍒', '🍑', '🍉'
+    ]
+  }
+];
+
+let activeEmojiCategoryKey = EMOJI_PACK_CATEGORIES[0].key;
+
+function renderEmojiPickerContent() {
+  if (!emojiTabsBarEl || !emojiGridEl) return;
+  emojiTabsBarEl.replaceChildren();
+  emojiGridEl.replaceChildren();
+
+  for (const cat of EMOJI_PACK_CATEGORIES) {
+    const tabBtn = document.createElement('button');
+    tabBtn.type = 'button';
+    tabBtn.className = `emoji-tab-btn${cat.key === activeEmojiCategoryKey ? ' is-active' : ''}`;
+    tabBtn.textContent = cat.label;
+    tabBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      activeEmojiCategoryKey = cat.key;
+      renderEmojiPickerContent();
+    });
+    emojiTabsBarEl.appendChild(tabBtn);
+  }
+
+  const currentCategory =
+    EMOJI_PACK_CATEGORIES.find((c) => c.key === activeEmojiCategoryKey) || EMOJI_PACK_CATEGORIES[0];
+
+  for (const emojiChar of currentCategory.emojis) {
+    const itemBtn = document.createElement('button');
+    itemBtn.type = 'button';
+    itemBtn.className = 'emoji-item-btn';
+    itemBtn.textContent = emojiChar;
+    itemBtn.title = emojiChar;
+    itemBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      insertEmojiIntoInput(emojiChar);
+    });
+    emojiGridEl.appendChild(itemBtn);
+  }
+}
+
+function insertEmojiIntoInput(emojiChar) {
+  if (!messageInputEl) return;
+  const start =
+    typeof messageInputEl.selectionStart === 'number'
+      ? messageInputEl.selectionStart
+      : messageInputEl.value.length;
+  const end =
+    typeof messageInputEl.selectionEnd === 'number'
+      ? messageInputEl.selectionEnd
+      : messageInputEl.value.length;
+  const val = messageInputEl.value;
+  messageInputEl.value = val.slice(0, start) + emojiChar + val.slice(end);
+  const nextCursor = start + emojiChar.length;
+  messageInputEl.focus();
+  try {
+    messageInputEl.setSelectionRange(nextCursor, nextCursor);
+  } catch {
+    // 忽略异常
+  }
+}
+
+function closeEmojiPicker() {
+  if (!emojiPickerPopoverEl || !emojiToggleBtn) return;
+  emojiPickerPopoverEl.classList.add('hidden');
+  emojiToggleBtn.classList.remove('is-active');
+  emojiToggleBtn.setAttribute('aria-expanded', 'false');
+}
+
+function toggleEmojiPicker(event) {
+  if (event) event.stopPropagation();
+  if (!emojiPickerPopoverEl || !emojiToggleBtn) return;
+  const willOpen = emojiPickerPopoverEl.classList.contains('hidden');
+  if (willOpen) {
+    renderEmojiPickerContent();
+    emojiPickerPopoverEl.classList.remove('hidden');
+    emojiToggleBtn.classList.add('is-active');
+    emojiToggleBtn.setAttribute('aria-expanded', 'true');
+  } else {
+    closeEmojiPicker();
+  }
+}
+
+if (emojiToggleBtn) {
+  emojiToggleBtn.addEventListener('click', toggleEmojiPicker);
+}
+
+if (emojiPickerPopoverEl) {
+  emojiPickerPopoverEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+}
+
+document.addEventListener('click', (event) => {
+  if (
+    emojiPickerPopoverEl &&
+    !emojiPickerPopoverEl.classList.contains('hidden') &&
+    messageInputWrapEl &&
+    !messageInputWrapEl.contains(event.target)
+  ) {
+    closeEmojiPicker();
+  }
+});
+
 function submitTextMessage() {
   const text = messageInputEl.value.trim();
   if (!text) return;
   messageInputEl.value = '';
+  closeEmojiPicker();
   dispatchOutgoingMessage({
     type: 'text',
     text,
@@ -2807,6 +2957,8 @@ messageInputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     submitTextMessage();
+  } else if (event.key === 'Escape') {
+    closeEmojiPicker();
   }
 });
 
