@@ -218,10 +218,14 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* 底部操作按钮：#494266 黛紫 × #E9E8EF 云水灰白 */
+/* 底部操作按钮：#494266 黛紫 × #E9E8EF 云水灰白 + 专属长椅暗语入口 */
 .landing-actions {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 11px;
+  width: 100%;
 }
 
 .primary-whisper-btn {
@@ -261,6 +265,46 @@ body {
 .primary-whisper-btn .btn-icon {
   width: 19px;
   height: 19px;
+}
+
+/* 首页副按钮：🪑 凭暗语 · 去我们的长椅 */
+.bench-entry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 26px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--brand-purple);
+  background: rgba(250, 249, 253, 0.88);
+  border: 1.5px solid rgba(73, 66, 102, 0.28);
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(73, 66, 102, 0.09);
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.bench-entry-btn:hover {
+  background: #ffffff;
+  border-color: var(--brand-purple);
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 24px rgba(73, 66, 102, 0.15);
+}
+
+.bench-entry-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.bench-waiting-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-connected);
+  box-shadow: 0 0 0 3px rgba(37, 122, 88, 0.22);
+  animation: pulseDot 1.4s infinite ease-in-out;
 }
 
 /* ==================== 2. 聊天沙龙主窗口（东方雅致层叠卡片） ==================== */
@@ -472,19 +516,45 @@ body {
   height: 15px;
 }
 
-/* 显眼的“结束并清除”按钮 */
+/* 随风散去（保留约定）按钮 */
+.gentle-scatter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-purple);
+  background: rgba(73, 66, 102, 0.1);
+  border: 1px solid rgba(73, 66, 102, 0.26);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.gentle-scatter-btn:hover {
+  background: var(--brand-purple);
+  color: var(--brand-mist);
+  transform: translateY(-1px);
+}
+
+/* 显眼的“话已燃尽 · 彻底销毁”按钮 */
 .danger-burn-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 15px;
-  font-size: 13px;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 14px;
+  font-size: 12.5px;
   font-weight: 600;
   color: #ffffff;
   background: var(--danger-bg);
   border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 999px;
   cursor: pointer;
+  white-space: nowrap;
   box-shadow: 0 4px 12px rgba(168, 60, 59, 0.22);
   transition: background 0.15s ease, transform 0.15s ease;
 }
@@ -606,7 +676,82 @@ body {
 .invite-format-hint {
   font-size: 11px;
   color: var(--ink-muted);
-  padding-left: 6px;
+  padding-left: 4px;
+}
+
+/* 长椅风铃守候栏（🎐 挂起风铃（对方上线即响） + 微风已至 · TA 正候你） */
+.bench-chime-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.wind-chime-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-purple);
+  background: #FAF9FD;
+  border: 1px solid rgba(73, 66, 102, 0.26);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(73, 66, 102, 0.06);
+  transition: all 0.18s ease;
+}
+
+.wind-chime-btn:hover {
+  border-color: var(--brand-purple);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.wind-chime-btn.is-active {
+  color: var(--brand-mist);
+  background: var(--brand-purple);
+  border-color: var(--brand-purple);
+  box-shadow: 0 4px 14px rgba(73, 66, 102, 0.24);
+}
+
+.wind-chime-btn.is-active .chime-icon {
+  display: inline-block;
+  animation: chimeSwing 2s infinite ease-in-out;
+}
+
+@keyframes chimeSwing {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(12deg); }
+  75% { transform: rotate(-12deg); }
+}
+
+.breeze-arrival-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #195e43;
+  background: rgba(37, 122, 88, 0.14);
+  border: 1px solid rgba(37, 122, 88, 0.34);
+  white-space: nowrap;
+  animation: fadeInBubble 0.22s ease-out;
+}
+
+.breeze-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-connected);
+  box-shadow: 0 0 0 3px rgba(37, 122, 88, 0.22);
+  animation: pulseDot 1.4s infinite ease-in-out;
 }
 
 /* ==================== 实时语音 / 视频通话来电横幅与主舞台 ==================== */
@@ -1784,21 +1929,370 @@ body.is-video-active .chat-composer {
   animation: fadeInBubble 0.2s ease-out;
 }
 
-/* ==================== 移动端自适应 ==================== */
-@media (max-width: 600px) {
+/* ==================== 4. 专属长椅暗语弹窗（🪑 凭暗语 · 去我们的长椅） ==================== */
+.bench-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  background: rgba(38, 33, 56, 0.62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  animation: fadeInBubble 0.18s ease-out;
+}
+
+.bench-modal-sheet {
+  width: 100%;
+  max-width: 440px;
+  background: #FAF9FD;
+  border: 1.5px solid var(--brand-purple);
+  border-radius: 22px;
+  padding: 22px 22px 20px;
+  box-shadow:
+    0 28px 64px rgba(35, 30, 54, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bench-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bench-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bench-modal-icon {
+  font-size: 20px;
+}
+
+.bench-modal-title {
+  font-family: "Songti SC", "Noto Serif SC", "STSong", "PingFang SC", serif;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--brand-purple);
+}
+
+.bench-modal-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(73, 66, 102, 0.18);
+  background: rgba(73, 66, 102, 0.06);
+  color: var(--brand-purple);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bench-modal-desc {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink-secondary);
+}
+
+.bench-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bench-input-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-purple);
+}
+
+.bench-phrase-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  color: var(--brand-purple);
+  background: #ffffff;
+  border: 1.5px solid rgba(73, 66, 102, 0.28);
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bench-phrase-input:focus {
+  border-color: var(--brand-purple);
+  box-shadow: 0 0 0 3px rgba(73, 66, 102, 0.12);
+}
+
+.bench-preset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bench-preset-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.bench-preset-chip {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand-purple);
+  background: rgba(73, 66, 102, 0.08);
+  border: 1px solid rgba(73, 66, 102, 0.2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.bench-preset-chip:hover {
+  background: var(--brand-purple);
+  color: var(--brand-mist);
+}
+
+.bench-probe-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  background: rgba(73, 66, 102, 0.06);
+  border: 1px solid rgba(73, 66, 102, 0.14);
+  transition: all 0.2s ease;
+}
+
+.bench-probe-box.is-waiting {
+  color: #195e43;
+  font-weight: 600;
+  background: rgba(37, 122, 88, 0.12);
+  border-color: rgba(37, 122, 88, 0.34);
+}
+
+.bench-probe-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  flex-shrink: 0;
+}
+
+.bench-probe-box.is-waiting .bench-probe-dot {
+  background: var(--status-connected);
+  box-shadow: 0 0 0 3px rgba(37, 122, 88, 0.22);
+  animation: pulseDot 1.4s infinite ease-in-out;
+}
+
+.bench-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.bench-btn-ghost {
+  padding: 10px 18px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  background: rgba(73, 66, 102, 0.08);
+  border: 1px solid rgba(73, 66, 102, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.bench-btn-primary {
+  padding: 10px 22px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--brand-mist);
+  background: var(--brand-purple);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(73, 66, 102, 0.24);
+}
+
+/* ==================== 手机竖屏长方形界面与桌面端双栖优美适配 ==================== */
+@media (max-width: 680px) {
+  html,
+  body {
+    height: 100%;
+    height: 100dvh;
+  }
+
   .app-shell {
-    padding: 8px 0;
+    padding: 0;
+    height: 100%;
+    height: 100dvh;
   }
+
+  /* 1. 手机端首页与结束页：纵向长方形黄金比例留白 */
+  .landing-panel {
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    justify-content: center;
+  }
+
+  .landing-card {
+    gap: 16px;
+  }
+
+  .brand-title {
+    font-size: 26px;
+  }
+
+  .brand-subtitle {
+    font-size: 13px;
+    padding: 0 8px;
+  }
+
+  .gallery-frame {
+    padding: 14px 14px 12px;
+  }
+
+  .gallery-artwork-wrap {
+    width: clamp(172px, 46vw, 224px);
+  }
+
+  .primary-whisper-btn,
+  .bench-entry-btn {
+    width: 100%;
+    max-width: 300px;
+  }
+
+  /* 2. 手机端聊天室：全屏长方形沉浸卡片 */
   .chat-panel {
-    height: calc(100vh - 16px);
+    max-width: 100%;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
     border-radius: 0;
-    border-left: none;
-    border-right: none;
+    border: none;
   }
+
+  .chat-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 9px;
+  }
+
+  .topbar-left {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .topbar-link-toggle {
+    margin-left: auto;
+    padding: 5px 10px;
+  }
+
+  .topbar-right {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .gentle-scatter-btn,
+  .danger-burn-btn {
+    width: 100%;
+    padding: 7px 8px;
+    font-size: 12px;
+  }
+
+  /* 3. 手机端密函与风铃栏 */
+  .invite-bar {
+    padding: 8px 12px;
+  }
+
+  .invite-url-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .invite-input-capsule {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  .bench-chime-row {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .wind-chime-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .invite-format-hint {
+    width: 100%;
+    padding-left: 2px;
+    font-size: 10.5px;
+  }
+
+  /* 4. 手机端消息列表与底部双层输入坞（上排输入+表情+发送，下排5枚媒介按钮均匀分布） */
+  .message-list {
+    padding: 14px 12px;
+    gap: 12px;
+  }
+
+  .msg-bubble {
+    max-width: 85%;
+    font-size: 14.5px;
+    padding: 10px 14px;
+  }
+
+  .chat-composer {
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .composer-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .message-input-wrap {
+    order: 1;
+    flex: 1 1 calc(100% - 92px);
+  }
+
+  .send-msg-btn {
+    order: 2;
+    height: 40px;
+    padding: 0 16px;
+  }
+
+  .composer-tools-dock {
+    order: 3;
+    width: 100%;
+    justify-content: space-around;
+    padding: 3px 6px;
+    border-radius: 12px;
+  }
+
+  .emoji-picker-popover {
+    right: -12px;
+    width: min(312px, 92vw);
+  }
+
   .hide-xs {
     display: none;
-  }
-  .msg-bubble {
-    max-width: 84%;
   }
 }

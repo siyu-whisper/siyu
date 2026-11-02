@@ -82,6 +82,18 @@ let maxRoomCapacity = 2;          // 默认最大人数为 2，最高可设为 5
 let selfJoinedAt = 0;
 let isSessionTerminated = false;
 
+// 专属长椅暗语与风铃守候运行态（纯内存驻留）
+let currentBenchPhrase = '';
+let isCurrentBenchRoom = false;
+let lastPreservedRoomInfo = null; // { roomId, benchPhrase, isBenchRoom }
+let isWindChimeHung = false;
+let remotePeerChimeWaiting = false;
+let remoteChimePeerAlias = '';
+let titleFlashInterval = null;
+const DEFAULT_DOC_TITLE = '私语 · 安静的聊聊心事';
+let activeBenchProbeWs = null;
+let activeBenchProbeRoomId = null;
+
 // 实时语音通话 / 高清视频连麦运行态（驻留内存）
 let activeCallSessionId = null;
 let activeCallMode = 'audio';     // 'audio' | 'video'
@@ -131,11 +143,24 @@ const chatViewEl = document.getElementById('chat-view');
 const terminatedViewEl = document.getElementById('terminated-view');
 const terminatedTitleEl = document.getElementById('terminated-title');
 const terminatedDescEl = document.getElementById('terminated-desc');
+const terminatedCaptionRightEl = document.getElementById('terminated-caption-right');
 
 const startWhisperBtn = document.getElementById('start-whisper-btn');
+const openBenchModalBtn = document.getElementById('open-bench-modal-btn');
+const landingBenchWaitingDotEl = document.getElementById('landing-bench-waiting-dot');
 const toggleInviteBtn = document.getElementById('toggle-invite-btn');
+const scatterKeepBtn = document.getElementById('scatter-keep-btn');
 const endAndClearBtn = document.getElementById('end-and-clear-btn');
+const rejoinBenchBtn = document.getElementById('rejoin-bench-btn');
 const backHomeBtn = document.getElementById('back-home-btn');
+
+const benchModalEl = document.getElementById('bench-modal');
+const closeBenchModalBtn = document.getElementById('close-bench-modal-btn');
+const cancelBenchModalBtn = document.getElementById('cancel-bench-modal-btn');
+const benchPhraseInputEl = document.getElementById('bench-phrase-input');
+const benchProbeBoxEl = document.getElementById('bench-probe-box');
+const benchProbeTextEl = document.getElementById('bench-probe-text');
+const confirmBenchEnterBtn = document.getElementById('confirm-bench-enter-btn');
 
 const connectionBadgeEl = document.getElementById('connection-badge');
 const connectionStatusTextEl = document.getElementById('connection-status-text');
@@ -148,9 +173,14 @@ const aliasEditInputEl = document.getElementById('alias-edit-input');
 const aliasSaveBtn = document.getElementById('alias-save-btn');
 
 const inviteBarEl = document.getElementById('invite-bar');
+const inviteTagBadgeEl = document.getElementById('invite-tag-badge');
 const inviteLinkInputEl = document.getElementById('invite-link-input');
 const copyLinkBtn = document.getElementById('copy-link-btn');
 const maxPeersSelectEl = document.getElementById('max-peers-select');
+const windChimeBtn = document.getElementById('wind-chime-btn');
+const windChimeBtnTextEl = document.getElementById('wind-chime-btn-text');
+const breezeArrivalPillEl = document.getElementById('breeze-arrival-pill');
+const breezeArrivalTextEl = document.getElementById('breeze-arrival-text');
 const inviteFormatHintEl = document.getElementById('invite-format-hint');
 
 const callInviteBannerEl = document.getElementById('call-invite-banner');
@@ -222,6 +252,10 @@ if (globalRegistryBus) {
       if (activeRoomId === data.roomId && !isSessionTerminated) {
         terminateAndBurnSession({ notifyPeer: false, mode: 'burned' });
       }
+    } else if (data.kind === 'room-scattered' && data.roomId) {
+      if (activeRoomId === data.roomId && !isSessionTerminated) {
+        terminateAndBurnSession({ notifyPeer: false, mode: 'scattered' });
+      }
     } else if (data.kind === 'query-room-state' && data.roomId && data.requesterId !== selfId) {
       // 如果查询的房间已被销毁，立即告知对方该链接已失效
       if (burnedRoomIds.has(data.roomId)) {
@@ -233,7 +267,7 @@ if (globalRegistryBus) {
         });
         return;
       }
-      // 如果查询的正是当前所在活跃房间，检查人数是否已满
+      // 如果查询的正是当前所在活跃房间，检查人数是否已满或有人正在长椅等候
       if (activeRoomId === data.roomId && !isSessionTerminated) {
         const currentCount = getAdmittedParticipantCount();
         if (!roomParticipants.has(data.requesterId) && currentCount >= maxRoomCapacity) {
@@ -244,14 +278,31 @@ if (globalRegistryBus) {
             status: 'full',
             maxCapacity: maxRoomCapacity
           });
+          return;
         }
+        globalRegistryBus.postMessage({
+          kind: 'room-state-reply',
+          roomId: data.roomId,
+          targetPeerId: data.requesterId,
+          status: isWindChimeHung ? 'chime-waiting' : 'active-waiting',
+          alias: myProfile.alias,
+          chimeActive: isWindChimeHung
+        });
       }
-    } else if (data.kind === 'room-state-reply' && data.roomId === activeRoomId && data.targetPeerId === selfId) {
-      if (data.status === 'terminated') {
-        recordRoomBurnedInMemory(data.roomId);
-        terminateAndBurnSession({ notifyPeer: false, mode: 'expired' });
-      } else if (data.status === 'full') {
-        terminateAndBurnSession({ notifyPeer: false, mode: 'full', maxCap: data.maxCapacity || maxRoomCapacity });
+    } else if (data.kind === 'room-state-reply' && data.targetPeerId === selfId) {
+      // 若正在首页长椅弹窗中探测该暗语房间状态
+      if (activeBenchProbeRoomId && data.roomId === activeBenchProbeRoomId) {
+        updateBenchProbeBannerUI(data.status, data.alias);
+      }
+      if (data.roomId === activeRoomId) {
+        if (data.status === 'terminated') {
+          recordRoomBurnedInMemory(data.roomId);
+          terminateAndBurnSession({ notifyPeer: false, mode: 'expired' });
+        } else if (data.status === 'full') {
+          terminateAndBurnSession({ notifyPeer: false, mode: 'full', maxCap: data.maxCapacity || maxRoomCapacity });
+        } else if (data.status === 'chime-waiting' || data.status === 'active-waiting') {
+          markRemoteBreezeArrival(data.alias || 'TA');
+        }
       }
     }
   };
@@ -271,6 +322,164 @@ function generateHighEntropyRoomId() {
     id += alphabet[bytes[i] % alphabet.length];
   }
   return id;
+}
+
+/**
+ * 根据双方约定的「专属长椅暗语」确定性派生固定的 22 位高熵房间 ID（SHA-256 哈希映射）
+ * 只要两人输入相同暗语，无需转发链接即可始终进入同一个端到端加密长椅房间
+ */
+async function deriveBenchRoomIdFromPhrase(rawPhrase) {
+  const normalized = (rawPhrase || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const seed = new TextEncoder().encode(`${APP_ID}::our-bench-v1::${normalized}`);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', seed));
+  let suffix = '';
+  for (let i = 0; i < 18; i++) {
+    suffix += alphabet[digest[i] % alphabet.length];
+  }
+  return `bench_${suffix}`;
+}
+
+/**
+ * 播放轻柔清脆的东方风铃泛音（当挂起风铃或「微风已至 · TA 正候你」对方进入长椅时响起）
+ */
+function playWindChimeSound() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  try {
+    const ctx = new AudioCtx();
+    const notes = [1046.5, 1318.5, 1567.98, 2093.0]; // C6, E6, G6, C7 清越风铃泛音
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const startAt = ctx.currentTime + idx * 0.11;
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.065, startAt + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 1.15);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt + 1.2);
+    });
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 1800);
+  } catch {
+    // 忽略浏览器静音策略限制
+  }
+}
+
+function stopTitleFlash() {
+  if (titleFlashInterval) {
+    clearInterval(titleFlashInterval);
+    titleFlashInterval = null;
+  }
+  document.title = DEFAULT_DOC_TITLE;
+}
+
+function triggerBreezeArrivalNotification(peerAlias = 'TA') {
+  playWindChimeSound();
+
+  // 若页面处于后台或未聚焦，闪烁标题并发送系统级温柔通知
+  if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+    if (!titleFlashInterval) {
+      let toggle = false;
+      titleFlashInterval = setInterval(() => {
+        if (document.visibilityState === 'visible' && document.hasFocus()) {
+          stopTitleFlash();
+          return;
+        }
+        toggle = !toggle;
+        document.title = toggle ? '🎐 微风已至 · TA 正候你' : DEFAULT_DOC_TITLE;
+      }, 1100);
+    }
+
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        const n = new Notification('私语 · 我们的长椅', {
+          body: `🎐 微风已至 · TA（${peerAlias}）正候你`,
+          icon: './logo.svg',
+          tag: 'siyu-breeze-arrival'
+        });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch {
+        // 忽略受限环境异常
+      }
+    }
+  }
+}
+
+function markRemoteBreezeArrival(peerAlias = 'TA', { ringChime = false } = {}) {
+  remotePeerChimeWaiting = true;
+  remoteChimePeerAlias = peerAlias || 'TA';
+  if (breezeArrivalPillEl && breezeArrivalTextEl) {
+    breezeArrivalTextEl.textContent = `微风已至 · TA 正候你`;
+    breezeArrivalPillEl.classList.remove('hidden');
+  }
+  if (landingBenchWaitingDotEl) {
+    landingBenchWaitingDotEl.classList.remove('hidden');
+  }
+  updateConnectionStatusUI();
+  if (ringChime) {
+    triggerBreezeArrivalNotification(remoteChimePeerAlias);
+  }
+}
+
+function updateWindChimeButtonUI() {
+  if (!windChimeBtn || !windChimeBtnTextEl) return;
+  windChimeBtn.classList.toggle('is-active', isWindChimeHung);
+  windChimeBtnTextEl.textContent = isWindChimeHung
+    ? '风铃已挂（对方上线即响）'
+    : '挂起风铃（对方上线即响）';
+}
+
+async function toggleWindChime() {
+  if (!activeRoomId || isSessionTerminated) return;
+  isWindChimeHung = !isWindChimeHung;
+  updateWindChimeButtonUI();
+
+  if (isWindChimeHung) {
+    playWindChimeSound();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch {
+        // 忽略不支持的环境
+      }
+    }
+    const chimeStatePkt = {
+      kind: 'room-state',
+      status: 'chime-waiting',
+      chimeActive: true,
+      roomId: activeRoomId,
+      senderId: selfId,
+      alias: myProfile.alias,
+      maxCapacity: maxRoomCapacity,
+      updatedAt: Date.now()
+    };
+    broadcastEnvelopePacket(chimeStatePkt);
+    await broadcastEncryptedWssPacket(chimeStatePkt, { retain: true });
+    showToast('🎐 已挂起风铃：对方进入长椅时将立即响起风铃清音并提醒你');
+  } else {
+    const activeStatePkt = {
+      kind: 'room-state',
+      status: 'active',
+      chimeActive: false,
+      roomId: activeRoomId,
+      senderId: selfId,
+      alias: myProfile.alias,
+      maxCapacity: maxRoomCapacity,
+      updatedAt: Date.now()
+    };
+    broadcastEnvelopePacket(activeStatePkt);
+    await broadcastEncryptedWssPacket(activeStatePkt, { retain: true });
+    showToast('已收起风铃');
+  }
 }
 
 function parseRoomIdFromHash() {
@@ -403,12 +612,14 @@ function getAdmittedParticipantCount() {
   return Math.max(1, roomParticipants.size);
 }
 
-function enterRoom(roomId, { isCreator = false } = {}) {
+function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase = '' } = {}) {
   // 若该房间链接已被标记为结束销毁，立即拦截并提示“连接已失效”
   if (burnedRoomIds.has(roomId)) {
     terminateAndBurnSession({ notifyPeer: false, mode: 'expired' });
     return;
   }
+
+  stopBenchRoomPresenceProbe();
 
   if (activeRooms.length > 0 || e2eeWssClients.length > 0 || localEphemeralBus) {
     cleanupMemoryAndLeaveRoom({ silent: true });
@@ -416,6 +627,14 @@ function enterRoom(roomId, { isCreator = false } = {}) {
 
   isSessionTerminated = false;
   activeRoomId = roomId;
+  isCurrentBenchRoom = Boolean(isBenchRoom || roomId.startsWith('bench_'));
+  currentBenchPhrase = benchPhrase || (isCurrentBenchRoom ? currentBenchPhrase : '');
+  isWindChimeHung = false;
+  remotePeerChimeWaiting = false;
+  remoteChimePeerAlias = '';
+  updateWindChimeButtonUI();
+  if (breezeArrivalPillEl) breezeArrivalPillEl.classList.add('hidden');
+
   selfJoinedAt = isCreator ? Date.now() - 10 : Date.now();
   roomCryptoKeyPromise = deriveRoomAesKey(roomId);
   connectedPeers.clear();
@@ -446,8 +665,13 @@ function enterRoom(roomId, { isCreator = false } = {}) {
   terminatedViewEl.classList.add('hidden');
   chatViewEl.classList.remove('hidden');
 
+  if (inviteTagBadgeEl) {
+    inviteTagBadgeEl.textContent = isCurrentBenchRoom ? '长椅' : '密函';
+  }
   inviteLinkInputEl.value = inviteUrl;
-  inviteFormatHintEl.textContent = `当前房间凭证仅存于 #room=${roomId}，任一人点击结束则全员退出且此链接立即失效`;
+  inviteFormatHintEl.textContent = isCurrentBenchRoom
+    ? `当前为专属长椅${currentBenchPhrase ? `（暗语：${currentBenchPhrase}）` : ''} · 聊完点「随风散去（保留约定）」可清空记录并保留此长椅`
+    : `当前密函 #room=${roomId} · 点「随风散去（保留约定）」可保留链接，点「话已燃尽 · 彻底销毁」则永久作废`;
   inviteBarEl.classList.remove('hidden');
 
   updateConnectionStatusUI();
@@ -568,12 +792,21 @@ function handleEnvelopePacket(packet) {
     return;
   }
 
+  // 1(B). 收到「随风散去（保留约定）」指令 -> 全员同步清空内存消息并回到结束页，但保留长椅暗语与房间链接
+  if (packet.kind === 'scatter-keep') {
+    terminateAndBurnSession({ notifyPeer: false, mode: 'scattered' });
+    return;
+  }
+
   if (packet.kind === 'room-state') {
     if (packet.status === 'terminated') {
       if (activeRoomId) recordRoomBurnedInMemory(activeRoomId);
       const isInitialJoin = connectedPeers.size === 0 && messages.length === 0;
       terminateAndBurnSession({ notifyPeer: false, mode: isInitialJoin ? 'expired' : 'burned' });
       return;
+    }
+    if (packet.status === 'chime-waiting' && packet.senderId !== selfId) {
+      markRemoteBreezeArrival(packet.alias || 'TA', { ringChime: false });
     }
     if (typeof packet.maxCapacity === 'number' && packet.maxCapacity >= 2 && packet.maxCapacity <= 5) {
       maxRoomCapacity = packet.maxCapacity;
@@ -720,11 +953,14 @@ function admitAndRegisterPeer(peerId, profile, joinedAt) {
 
   // 如果自己的默认代号与更早进房间的成员撞名，自动切换为下一个国风代号
   resolveAliasCollisionIfNeeded();
+  markRemoteBreezeArrival(roomParticipants.get(peerId)?.alias || 'TA', {
+    ringChime: !wasConnected && (isWindChimeHung || isCurrentBenchRoom || document.visibilityState === 'hidden')
+  });
   updateConnectionStatusUI();
 
   if (!wasConnected) {
     const peerAlias = roomParticipants.get(peerId)?.alias || '对方';
-    showToast(`${peerAlias} 已加入私语房间 (${getAdmittedParticipantCount()}/${maxRoomCapacity})`);
+    showToast(`🎐 微风已至 · TA（${peerAlias}）正候你 (${getAdmittedParticipantCount()}/${maxRoomCapacity})`);
   }
 }
 
@@ -1051,7 +1287,15 @@ function updateConnectionStatusUI() {
   if (isConnected) {
     connectionBadgeEl.classList.remove('status-waiting');
     connectionBadgeEl.classList.add('status-connected');
-    connectionStatusTextEl.textContent = `已连接 (${count}/${maxRoomCapacity})`;
+    connectionStatusTextEl.textContent = `微风已至 · TA 正候你 (${count}/${maxRoomCapacity})`;
+    if (breezeArrivalPillEl && breezeArrivalTextEl) {
+      breezeArrivalTextEl.textContent = '微风已至 · TA 正候你';
+      breezeArrivalPillEl.classList.remove('hidden');
+    }
+  } else if (remotePeerChimeWaiting) {
+    connectionBadgeEl.classList.remove('status-waiting');
+    connectionBadgeEl.classList.add('status-connected');
+    connectionStatusTextEl.textContent = `微风已至 · TA 正候你 (${count}/${maxRoomCapacity})`;
   } else {
     connectionBadgeEl.classList.remove('status-connected');
     connectionBadgeEl.classList.add('status-waiting');
@@ -2406,13 +2650,15 @@ function synthesizeGentleWhisperWavDataUrl(seconds = 2) {
  * 八、“结束并清除”全员退出、原链接永久作废与 beforeunload 兜底
  * ============================================================================
  */
-function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silent = false } = {}) {
+function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, scatterKeep = false, silent = false } = {}) {
   const closingRoomId = activeRoomId;
   const closingKeyPromise = roomCryptoKeyPromise;
   const closingWssClients = e2eeWssClients.slice();
   const closingRooms = activeRooms.slice();
   const closingP2pDispatchers = p2pDispatchers.slice();
   const closingLocalBus = localEphemeralBus;
+
+  stopTitleFlash();
 
   if (presenceHeartbeatTimer) {
     clearInterval(presenceHeartbeatTimer);
@@ -2444,13 +2690,23 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
         // 忽略异常
       }
     }
+  } else if (scatterKeep && closingRoomId) {
+    if (globalRegistryBus) {
+      try {
+        globalRegistryBus.postMessage({ kind: 'room-scattered', roomId: closingRoomId });
+      } catch {
+        // 忽略异常
+      }
+    }
   }
 
-  // 向所有在线成员发送实时结束指令或单人离开通知，并在 WSS 写入加密销毁墓碑
+  // 向所有在线成员发送实时结束指令、随风散去（保留约定）指令或单人离开通知
   if (notifyPeer && closingRoomId) {
     const outPacket = burnRoom
       ? { kind: 'terminate', senderId: selfId, roomId: closingRoomId }
-      : { kind: 'peer-leave', senderId: selfId };
+      : scatterKeep
+        ? { kind: 'scatter-keep', senderId: selfId, roomId: closingRoomId }
+        : { kind: 'peer-leave', senderId: selfId };
 
     for (const sendFn of closingP2pDispatchers) {
       try {
@@ -2467,7 +2723,7 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
       }
     }
 
-    // 异步加密发送实时通知 + Retain=1 房间销毁永久墓碑后再关闭底层套接字
+    // 异步加密发送实时通知 + 状态更新后再关闭底层套接字
     (async () => {
       await broadcastEncryptedWssPacket(outPacket, {
         retain: false,
@@ -2481,6 +2737,21 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
             status: 'terminated',
             roomId: closingRoomId,
             endedAt: Date.now()
+          },
+          {
+            retain: true,
+            targetClients: closingWssClients,
+            keyPromise: closingKeyPromise
+          }
+        );
+      } else if (scatterKeep) {
+        await broadcastEncryptedWssPacket(
+          {
+            kind: 'room-state',
+            status: 'active',
+            chimeActive: false,
+            roomId: closingRoomId,
+            updatedAt: Date.now()
           },
           {
             retain: true,
@@ -2577,6 +2848,9 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
   connectedPeers.clear();
   roomParticipants.clear();
   incomingChunkBuffer.clear();
+  isWindChimeHung = false;
+  remotePeerChimeWaiting = false;
+  updateWindChimeButtonUI();
 
   ephemeralObjectUrls.forEach((url) => {
     try {
@@ -2606,18 +2880,36 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, silen
  * 切换至终态/拦截画面
  * @param {Object} options
  * @param {boolean} options.notifyPeer - 是否向房间内所有成员广播结束指令
- * @param {'burned'|'expired'|'full'} options.mode
- *   - 'burned' : 房间内任一成员点击“结束并清除”，所有人同步回到结束界面（“话已燃尽，一切随风去吧。”）
- *   - 'expired': 点击了已经销毁失效的旧链接（提示“连接已失效”）
- *   - 'full'   : 超过房间设定最大人数上限（提示“无法加入私语”）
+ * @param {'burned'|'scattered'|'expired'|'full'} options.mode
+ *   - 'burned'   : 房间内任一成员点击“话已燃尽 · 彻底销毁”，所有人同步回到结束界面且原连接永久作废
+ *   - 'scattered': 房间内任一成员点击“随风散去（保留约定）”，所有人清空内存聊天记录，但保留长椅暗语与房间链接
+ *   - 'expired'  : 点击了已经销毁失效的旧链接（提示“连接已失效”）
+ *   - 'full'     : 超过房间设定最大人数上限（提示“无法加入私语”）
  */
 function terminateAndBurnSession({ notifyPeer = true, mode = 'burned', maxCap = maxRoomCapacity } = {}) {
   if (isSessionTerminated) return;
 
+  const snapshotRoomId = activeRoomId;
+  const snapshotBenchPhrase = currentBenchPhrase;
+  const snapshotIsBench = isCurrentBenchRoom;
+
   const shouldBurnRoom = mode === 'burned' || mode === 'expired';
+  const isScatteredKeep = mode === 'scattered';
+
+  if (isScatteredKeep && snapshotRoomId) {
+    lastPreservedRoomInfo = {
+      roomId: snapshotRoomId,
+      benchPhrase: snapshotBenchPhrase,
+      isBenchRoom: snapshotIsBench
+    };
+  } else if (shouldBurnRoom) {
+    lastPreservedRoomInfo = null;
+  }
+
   cleanupMemoryAndLeaveRoom({
     notifyPeer,
     burnRoom: shouldBurnRoom,
+    scatterKeep: isScatteredKeep,
     silent: false
   });
   isSessionTerminated = true;
@@ -2628,15 +2920,29 @@ function terminateAndBurnSession({ notifyPeer = true, mode = 'burned', maxCap = 
   if (terminatedTitleEl && terminatedDescEl) {
     if (mode === 'expired') {
       terminatedTitleEl.textContent = '连接已失效';
-      terminatedDescEl.textContent = '该私语房间已结束销毁，此连接已失效，一切随风去吧。';
+      terminatedDescEl.textContent = '话已燃尽 · 该私语连接已彻底销毁失效，一切随风去吧。';
+      if (terminatedCaptionRightEl) terminatedCaptionRightEl.textContent = '彻底销毁';
+      if (rejoinBenchBtn) rejoinBenchBtn.classList.add('hidden');
       showToast('该私语连接已失效，无法进入');
     } else if (mode === 'full') {
       terminatedTitleEl.textContent = '无法加入私语';
       terminatedDescEl.textContent = `当前房间人数已达上限（最多 ${maxCap} 人），无法加入。`;
+      if (terminatedCaptionRightEl) terminatedCaptionRightEl.textContent = '人数已满';
+      if (rejoinBenchBtn) rejoinBenchBtn.classList.add('hidden');
       showToast(`无法加入：房间人数已满（上限 ${maxCap} 人）`);
+    } else if (mode === 'scattered') {
+      terminatedTitleEl.textContent = '随风散去（保留约定）';
+      terminatedDescEl.textContent = '今日私语已随风散去，我们的长椅仍在，下次随时凭暗语重逢。';
+      if (terminatedCaptionRightEl) terminatedCaptionRightEl.textContent = '保留约定';
+      if (rejoinBenchBtn && lastPreservedRoomInfo) {
+        rejoinBenchBtn.classList.remove('hidden');
+      }
+      showToast('🍃 今日私语已随风散去（长椅约定已保留）');
     } else {
       terminatedTitleEl.textContent = '私语';
       terminatedDescEl.textContent = '话已燃尽，一切随风去吧。';
+      if (terminatedCaptionRightEl) terminatedCaptionRightEl.textContent = '彻底销毁';
+      if (rejoinBenchBtn) rejoinBenchBtn.classList.add('hidden');
     }
   }
 
@@ -2657,22 +2963,221 @@ window.addEventListener('pagehide', handleBeforeUnloadCleanup);
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    stopTitleFlash();
     acknowledgeUnreadReceivedMessages();
   }
 });
 window.addEventListener('focus', () => {
+  stopTitleFlash();
   acknowledgeUnreadReceivedMessages();
 });
 
 /**
  * ============================================================================
- * 九、UI 交互事件绑定
+ * 九、专属长椅暗语探测与 UI 交互事件绑定
  * ============================================================================
  */
+function stopBenchRoomPresenceProbe() {
+  activeBenchProbeRoomId = null;
+  if (activeBenchProbeWs) {
+    try {
+      activeBenchProbeWs.close();
+    } catch {
+      // 忽略异常
+    }
+    activeBenchProbeWs = null;
+  }
+}
+
+function updateBenchProbeBannerUI(status, peerAlias = 'TA') {
+  if (!benchProbeBoxEl || !benchProbeTextEl) return;
+  if (status === 'terminated') {
+    benchProbeBoxEl.classList.remove('is-waiting');
+    benchProbeTextEl.textContent = '🔥 该暗语长椅已「话已燃尽 · 彻底销毁」，请约定一句新暗语';
+  } else if (status === 'chime-waiting') {
+    benchProbeBoxEl.classList.add('is-waiting');
+    benchProbeTextEl.textContent = `🎐 微风已至 · TA（${peerAlias}）正候你 · 已在长椅挂起风铃`;
+    if (landingBenchWaitingDotEl) landingBenchWaitingDotEl.classList.remove('hidden');
+  } else if (status === 'active-waiting') {
+    benchProbeBoxEl.classList.add('is-waiting');
+    benchProbeTextEl.textContent = `🟢 微风已至 · TA（${peerAlias}）正候你`;
+    if (landingBenchWaitingDotEl) landingBenchWaitingDotEl.classList.remove('hidden');
+  } else {
+    benchProbeBoxEl.classList.remove('is-waiting');
+    benchProbeTextEl.textContent = '长椅此刻安静无声 · 坐下后可点击「🎐 挂起风铃（对方上线即响）」';
+  }
+}
+
+async function probeBenchRoomPresence(rawPhrase) {
+  stopBenchRoomPresenceProbe();
+  const trimmed = (rawPhrase || '').trim();
+  if (!trimmed || trimmed.length < 2) {
+    if (benchProbeBoxEl && benchProbeTextEl) {
+      benchProbeBoxEl.classList.remove('is-waiting');
+      benchProbeTextEl.textContent = '输入暗语后，将自动聆听长椅上是否有微风与风铃...';
+    }
+    return;
+  }
+
+  const derivedRoomId = await deriveBenchRoomIdFromPhrase(trimmed);
+  if (!derivedRoomId) return;
+  activeBenchProbeRoomId = derivedRoomId;
+
+  if (burnedRoomIds.has(derivedRoomId)) {
+    updateBenchProbeBannerUI('terminated');
+    return;
+  }
+
+  updateBenchProbeBannerUI('idle');
+
+  // 1. 先向同源 BroadcastChannel 查询是否有活跃长椅成员
+  if (globalRegistryBus) {
+    globalRegistryBus.postMessage({
+      kind: 'query-room-state',
+      roomId: derivedRoomId,
+      requesterId: selfId
+    });
+  }
+
+  // 2. 同时通过加密 WSS stateTopic 读取该长椅是否挂起了风铃或已销毁
+  if (typeof WebSocket !== 'undefined' && PUBLIC_WSS_BROKERS.length > 0) {
+    try {
+      const keyPromise = deriveRoomAesKey(derivedRoomId);
+      const stateTopic = `siyu/v2/${APP_ID}/${derivedRoomId}/state`;
+      const ws = new WebSocket(PUBLIC_WSS_BROKERS[0], 'mqtt');
+      ws.binaryType = 'arraybuffer';
+      activeBenchProbeWs = ws;
+
+      ws.onopen = () => {
+        const randSuffix = Math.random().toString(36).slice(2, 8);
+        ws.send(buildMqttConnectPacket(`siyu_prb_${randSuffix}`));
+      };
+
+      ws.onmessage = async (event) => {
+        if (activeBenchProbeRoomId !== derivedRoomId || !event.data) return;
+        const buf = new Uint8Array(event.data);
+        const packetType = buf[0] & 0xf0;
+        if (packetType === 0x20) {
+          ws.send(buildMqttSubscribePacket(stateTopic, 1));
+        } else if (packetType === 0x30) {
+          let idx = 1;
+          let multiplier = 1;
+          let remLen = 0;
+          let byte;
+          do {
+            byte = buf[idx++];
+            remLen += (byte & 127) * multiplier;
+            multiplier *= 128;
+          } while ((byte & 128) !== 0);
+          const packetEnd = idx + remLen;
+          const topicLen = (buf[idx] << 8) | buf[idx + 1];
+          let pIdx = idx + 2 + topicLen;
+          const qos = (buf[0] >> 1) & 0x03;
+          if (qos > 0) pIdx += 2;
+          const rawStr = new TextDecoder().decode(buf.subarray(pIdx, packetEnd));
+          try {
+            const frame = JSON.parse(rawStr);
+            const plain = await decryptRoomText(frame.iv, frame.ct, keyPromise);
+            if (!plain) return;
+            const pkt = JSON.parse(plain);
+            if (pkt.kind === 'room-state') {
+              if (pkt.status === 'terminated') {
+                recordRoomBurnedInMemory(derivedRoomId);
+                updateBenchProbeBannerUI('terminated');
+              } else if (pkt.status === 'chime-waiting' && pkt.chimeActive) {
+                updateBenchProbeBannerUI('chime-waiting', pkt.alias || 'TA');
+              }
+            }
+          } catch {
+            // 忽略解密异常
+          }
+        }
+      };
+
+      ws.onerror = () => {};
+    } catch {
+      // 忽略探测异常
+    }
+  }
+}
+
+function openBenchModal() {
+  if (!benchModalEl) return;
+  benchModalEl.classList.remove('hidden');
+  if (benchPhraseInputEl) {
+    if (!benchPhraseInputEl.value && currentBenchPhrase) {
+      benchPhraseInputEl.value = currentBenchPhrase;
+    }
+    benchPhraseInputEl.focus();
+    probeBenchRoomPresence(benchPhraseInputEl.value);
+  }
+}
+
+function closeBenchModal() {
+  stopBenchRoomPresenceProbe();
+  if (benchModalEl) {
+    benchModalEl.classList.add('hidden');
+  }
+}
+
+async function confirmEnterBenchRoom() {
+  const phrase = benchPhraseInputEl ? benchPhraseInputEl.value.trim() : '';
+  if (!phrase || phrase.length < 2) {
+    showToast('请输入至少 2 个字符的专属长椅暗语');
+    if (benchPhraseInputEl) benchPhraseInputEl.focus();
+    return;
+  }
+  const derivedRoomId = await deriveBenchRoomIdFromPhrase(phrase);
+  if (!derivedRoomId) return;
+  closeBenchModal();
+  enterRoom(derivedRoomId, {
+    isCreator: false,
+    isBenchRoom: true,
+    benchPhrase: phrase
+  });
+}
+
 // 1. 首页点击“点击我，开始私语吧”：生成全新高熵房间 ID 并作为创建者进入
 startWhisperBtn.addEventListener('click', () => {
   const newRoomId = generateHighEntropyRoomId();
-  enterRoom(newRoomId, { isCreator: true });
+  enterRoom(newRoomId, { isCreator: true, isBenchRoom: false });
+});
+
+// 1(B). 首页点击“🪑 凭暗语 · 去我们的长椅”
+if (openBenchModalBtn) {
+  openBenchModalBtn.addEventListener('click', openBenchModal);
+}
+if (closeBenchModalBtn) {
+  closeBenchModalBtn.addEventListener('click', closeBenchModal);
+}
+if (cancelBenchModalBtn) {
+  cancelBenchModalBtn.addEventListener('click', closeBenchModal);
+}
+if (confirmBenchEnterBtn) {
+  confirmBenchEnterBtn.addEventListener('click', confirmEnterBenchRoom);
+}
+if (benchPhraseInputEl) {
+  benchPhraseInputEl.addEventListener('input', () => {
+    probeBenchRoomPresence(benchPhraseInputEl.value);
+  });
+  benchPhraseInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      confirmEnterBenchRoom();
+    } else if (e.key === 'Escape') {
+      closeBenchModal();
+    }
+  });
+}
+document.querySelectorAll('.bench-preset-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const p = chip.getAttribute('data-phrase') || '';
+    if (benchPhraseInputEl) {
+      benchPhraseInputEl.value = p;
+      benchPhraseInputEl.focus();
+      probeBenchRoomPresence(p);
+    }
+  });
 });
 
 // 2. 点击“复制链接”
@@ -2773,17 +3278,41 @@ if (selfAliasBtn && aliasEditBoxEl && aliasEditInputEl && aliasSaveBtn) {
   });
 }
 
-// 5. 显隐邀请链接栏
+// 5. 显隐邀请链接栏与「🎐 挂起风铃（对方上线即响）」
 toggleInviteBtn.addEventListener('click', () => {
   inviteBarEl.classList.toggle('hidden');
 });
 
-// 6. 点击“结束并清除”按钮：所有人同步结束退出，原房间连接彻底失效
+if (windChimeBtn) {
+  windChimeBtn.addEventListener('click', () => {
+    toggleWindChime();
+  });
+}
+
+// 6(A). 点击“🍃 随风散去（保留约定）”按钮：所有人同步清空内存聊天记录，但保留长椅暗语与房间链接
+if (scatterKeepBtn) {
+  scatterKeepBtn.addEventListener('click', () => {
+    terminateAndBurnSession({ notifyPeer: true, mode: 'scattered' });
+  });
+}
+
+// 6(B). 点击“🔥 话已燃尽 · 彻底销毁”按钮：所有人同步结束退出，原房间连接彻底失效
 endAndClearBtn.addEventListener('click', () => {
   terminateAndBurnSession({ notifyPeer: true, mode: 'burned' });
 });
 
-// 7. 终态页点击“重新开始私语”返回首页
+// 7. 终态页点击“🪑 凭暗语 · 回到我们的长椅”或“重新开始私语”
+if (rejoinBenchBtn) {
+  rejoinBenchBtn.addEventListener('click', () => {
+    if (!lastPreservedRoomInfo || !lastPreservedRoomInfo.roomId) return;
+    enterRoom(lastPreservedRoomInfo.roomId, {
+      isCreator: false,
+      isBenchRoom: Boolean(lastPreservedRoomInfo.isBenchRoom),
+      benchPhrase: lastPreservedRoomInfo.benchPhrase || ''
+    });
+  });
+}
+
 backHomeBtn.addEventListener('click', () => {
   isSessionTerminated = false;
   terminatedViewEl.classList.add('hidden');
