@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="/siyu/assets/logo-BoxwIc6u.svg" />
-  <script type="module" crossorigin src="/siyu/assets/index-Cq5Rd8se.js"></script>
-  <link rel="stylesheet" crossorigin href="/siyu/assets/index-FcSxHQI8.css">
+  <script type="module" crossorigin src="/siyu/assets/index-DZsPnMLV.js"></script>
+  <link rel="stylesheet" crossorigin href="/siyu/assets/index-C4QStUnU.css">
 </head>
 <body>
   <!-- 柔和国风底纹层（#E9E8EF 云水缣素 × #494266 暮山黛紫 × 疏竹暗纹） -->
@@ -53,7 +53,7 @@
           </div>
         </div>
 
-        <!-- 底部：暮山黛紫 × 云水灰白开启按钮 -->
+        <!-- 底部：暮山黛紫 × 云水灰白开启按钮 + 专属长椅暗语入口 -->
         <div class="landing-actions">
           <button id="start-whisper-btn" type="button" class="primary-whisper-btn">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -62,13 +62,19 @@
             </svg>
             <span>点击我，开始私语吧</span>
           </button>
+
+          <button id="open-bench-modal-btn" type="button" class="bench-entry-btn">
+            <span class="bench-entry-icon" aria-hidden="true">🪑</span>
+            <span>凭暗语 · 去我们的长椅</span>
+            <span id="landing-bench-waiting-dot" class="bench-waiting-dot hidden" title="微风已至 · TA 正候你"></span>
+          </button>
         </div>
       </div>
     </section>
 
     <!-- ==================== 2. 聊天主界面（房间激活时展示） ==================== -->
     <section id="chat-view" class="view-panel chat-panel hidden" aria-label="私语对话窗口">
-      <!-- 顶部固定栏：Logo + 房间状态指示 + 方案A国风代号印章 + 音视频快捷入口 + “结束并清除”按钮 -->
+      <!-- 顶部固定栏：Logo + 房间状态指示 + 方案A国风代号印章 + 随风散去/彻底销毁双模式按钮 -->
       <header class="chat-topbar">
         <div class="topbar-left">
           <img src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%20fill='none'%3e%3c!--%20方案%20L1：折页耳语（中国风对撞色%20%23494266%20黛紫%20×%20%23E9E8EF%20云水灰白）%20--%3e%3crect%20x='4'%20y='4'%20width='56'%20height='56'%20rx='15'%20fill='%23E9E8EF'%20stroke='%23494266'%20stroke-width='1.8'/%3e%3c!--%20左折页与右折页（构成的立体半掩报页）%20--%3e%3cpath%20d='M16%2020L32%2016V45L16%2049V20Z'%20fill='%23DFDDE9'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3cpath%20d='M48%2020L32%2016V45L48%2049V20Z'%20fill='%23F4F3F8'%20stroke='%23494266'%20stroke-width='1.8'%20stroke-linejoin='round'/%3e%3c!--%20报页后方微微探出的双人私语圆点%20--%3e%3ccircle%20cx='27.5'%20cy='31.5'%20r='2.3'%20fill='%23494266'/%3e%3ccircle%20cx='36.5'%20cy='31.5'%20r='2.3'%20fill='%237B7399'/%3e%3c!--%20顶部一缕消散于风中的轻音弧线%20--%3e%3cpath%20d='M25%2011.5C29.5%209.2%2034.5%209.2%2039%2011.5'%20stroke='%236E668C'%20stroke-width='1.5'%20stroke-linecap='round'/%3e%3c/svg%3e" alt="私语" class="brand-logo-sm" width="32" height="32" />
@@ -94,34 +100,35 @@
               <button id="alias-save-btn" type="button" class="alias-save-btn">确定</button>
             </div>
           </div>
-        </div>
 
-        <div class="topbar-right">
-          <button id="toggle-invite-btn" type="button" class="ghost-icon-btn" title="展开或收起密函邀请凭据">
+          <button id="toggle-invite-btn" type="button" class="ghost-icon-btn topbar-link-toggle" title="展开或收起密函与风铃面板">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="hide-xs">密函链接</span>
           </button>
+        </div>
 
-          <button id="end-and-clear-btn" type="button" class="danger-burn-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14" stroke-linecap="round" stroke-linejoin="round"/>
-              <line x1="10" y1="11" x2="10" y2="17" stroke-linecap="round"/>
-              <line x1="14" y1="11" x2="14" y2="17" stroke-linecap="round"/>
-            </svg>
-            <span>结束并清除</span>
+        <div class="topbar-right">
+          <button id="scatter-keep-btn" type="button" class="gentle-scatter-btn" title="清空双方当前私语记录，但保留长椅暗语与房间链接，下次仍可重逢">
+            <span aria-hidden="true">🍃</span>
+            <span>随风散去（保留约定）</span>
+          </button>
+
+          <button id="end-and-clear-btn" type="button" class="danger-burn-btn" title="清空所有私语记录并永久作废此房间连接">
+            <span aria-hidden="true">🔥</span>
+            <span>话已燃尽 · 彻底销毁</span>
           </button>
         </div>
       </header>
 
-      <!-- 房间邀请链接面板（精致胶囊式密函凭据条 + 默认2人/最大5人上限设置） -->
+      <!-- 房间邀请链接与「挂起风铃」面板 -->
       <div id="invite-bar" class="invite-bar">
         <div class="invite-info">
           <div class="invite-url-row">
             <div class="invite-input-capsule">
-              <span class="invite-tag-badge">密函</span>
+              <span id="invite-tag-badge" class="invite-tag-badge">密函</span>
               <input id="invite-link-input" type="text" class="invite-url-input" readonly aria-label="房间邀请链接" />
             </div>
             <button id="copy-link-btn" type="button" class="copy-link-btn">复制链接</button>
@@ -135,7 +142,21 @@
               </select>
             </label>
           </div>
-          <span id="invite-format-hint" class="invite-format-hint"></span>
+
+          <!-- 固定长椅风铃守候栏：🎐 挂起风铃（对方上线即响） + 微风已至状态提示 -->
+          <div class="bench-chime-row">
+            <button id="wind-chime-btn" type="button" class="wind-chime-btn" title="挂起风铃后，对方一旦进入长椅，将立即响起风铃清音并弹出系统提醒">
+              <span class="chime-icon" aria-hidden="true">🎐</span>
+              <span id="wind-chime-btn-text">挂起风铃（对方上线即响）</span>
+            </button>
+
+            <div id="breeze-arrival-pill" class="breeze-arrival-pill hidden" role="status" aria-live="polite">
+              <span class="breeze-dot"></span>
+              <span id="breeze-arrival-text">微风已至 · TA 正候你</span>
+            </div>
+
+            <span id="invite-format-hint" class="invite-format-hint"></span>
+          </div>
         </div>
       </div>
 
@@ -356,11 +377,16 @@
           </div>
           <div class="gallery-caption">
             <span>SIYU · GONE WITH THE WIND</span>
-            <span>痕迹已清</span>
+            <span id="terminated-caption-right">痕迹已清</span>
           </div>
         </div>
 
         <div class="landing-actions">
+          <button id="rejoin-bench-btn" type="button" class="bench-entry-btn hidden">
+            <span class="bench-entry-icon" aria-hidden="true">🪑</span>
+            <span>凭暗语 · 回到我们的长椅</span>
+          </button>
+
           <button id="back-home-btn" type="button" class="primary-whisper-btn">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -372,6 +398,56 @@
       </div>
     </section>
   </main>
+
+  <!-- ==================== 4. 专属长椅暗语弹窗（🪑 凭暗语 · 去我们的长椅） ==================== -->
+  <div id="bench-modal" class="bench-modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="凭暗语去我们的长椅">
+    <div class="bench-modal-sheet">
+      <div class="bench-modal-header">
+        <div class="bench-modal-title-wrap">
+          <span class="bench-modal-icon" aria-hidden="true">🪑</span>
+          <h3 class="bench-modal-title">凭暗语 · 去我们的长椅</h3>
+        </div>
+        <button id="close-bench-modal-btn" type="button" class="bench-modal-close" aria-label="关闭">✕</button>
+      </div>
+
+      <p class="bench-modal-desc">
+        约定一句只有你们知道的暗语，无需每次转发新链接。无论何时输入同一句暗语，都会回到同一张专属长椅。
+      </p>
+
+      <div class="bench-input-group">
+        <label class="bench-input-label" for="bench-phrase-input">你们的专属长椅暗语</label>
+        <input
+          id="bench-phrase-input"
+          type="text"
+          class="bench-phrase-input"
+          maxlength="48"
+          placeholder="例如：晚风与热茶-1024"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <div class="bench-preset-row">
+        <span class="bench-preset-label">灵感示例：</span>
+        <button type="button" class="bench-preset-chip" data-phrase="晚风与热茶">晚风与热茶</button>
+        <button type="button" class="bench-preset-chip" data-phrase="长椅旧报">长椅旧报</button>
+        <button type="button" class="bench-preset-chip" data-phrase="竹林听雨">竹林听雨</button>
+      </div>
+
+      <!-- 实时候人风铃感知状态栏（当检测到对方已在长椅或挂起风铃时，点亮“微风已至 · TA 正候你”） -->
+      <div id="bench-probe-box" class="bench-probe-box">
+        <span id="bench-probe-dot" class="bench-probe-dot"></span>
+        <span id="bench-probe-text" class="bench-probe-text">输入暗语后，将自动聆听长椅上是否有微风与风铃...</span>
+      </div>
+
+      <div class="bench-modal-actions">
+        <button id="cancel-bench-modal-btn" type="button" class="bench-btn-ghost">返回</button>
+        <button id="confirm-bench-enter-btn" type="button" class="bench-btn-primary">
+          <span>🪑 凭暗语 · 去我们的长椅</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- 内存图片灯箱预览（随会话销毁同步清除） -->
   <div id="image-lightbox" class="image-lightbox hidden" role="dialog" aria-label="图片预览">
