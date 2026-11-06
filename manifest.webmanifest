@@ -1,0 +1,25 @@
+{
+  "name": "私语 · 安静的聊聊心事",
+  "short_name": "私语",
+  "description": "有些话不必惊动世界，读完便融进风里。零后端点对点端到端加密阅后即焚私密聊天与高清音视频。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#E9E8EF",
+  "theme_color": "#494266",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
