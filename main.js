@@ -4,10 +4,12 @@
  * 架构：Trystero (WebRTC DataChannel 端到端加密) + E2EE 零存储跨网直连 + 纯内存驻留 + 退出全员即焚
  * ============================================================================
  */
-import { joinRoom as joinMqttRoom, selfId } from 'trystero/mqtt';
+import { joinRoom as joinMqttRoom, selfId as rawTrysteroSelfId } from 'trystero/mqtt';
 import { joinRoom as joinNostrRoom } from 'trystero/nostr';
 
 const APP_ID = 'waiting-for-you-siyu';
+const PEER_STALE_TIMEOUT_MS = 7500;
+const LIVE_CAPACITY_CHECK_MS = 950;
 
 // 国内外高可用公共 WSS 消息中继（用于 WebRTC 信令握手、AES-GCM-256 端到端加密瞬态转发及房间销毁墓碑标记）
 const PUBLIC_WSS_BROKERS = [
@@ -42,42 +44,57 @@ const processedMessageIds = new Set();
 const ephemeralObjectUrls = new Set();
 const incomingChunkBuffer = new Map();
 const burnedRoomIds = new Set();
+let selfId = rawTrysteroSelfId;
 
-// 从当前标签页内存属性 window.name 中恢复本标签已销毁的房间 ID（不读写任何 Storage/Cookie）
+function syncWindowMemoryState() {
+  try {
+    const list = Array.from(burnedRoomIds).slice(-50);
+    window.name = `siyu_mem:${JSON.stringify({ selfId, burned: list })}`;
+  } catch {
+    // 忽略异常
+  }
+}
+
+// 从当前标签页内存属性 window.name 中恢复本标签稳定的 selfId 与已销毁房间 ID（不读写任何 Storage/Cookie）
 (function restoreBurnedRoomsFromWindowMemory() {
   try {
     if (window.name && window.name.startsWith('siyu_mem:')) {
       const parsed = JSON.parse(window.name.slice(9));
       if (Array.isArray(parsed)) {
         parsed.forEach((id) => burnedRoomIds.add(id));
+      } else if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.selfId === 'string' && parsed.selfId.length >= 12) {
+          selfId = parsed.selfId;
+        }
+        if (Array.isArray(parsed.burned)) {
+          parsed.burned.forEach((id) => burnedRoomIds.add(id));
+        }
       }
     }
   } catch {
     // 忽略异常
   }
+  syncWindowMemoryState();
 })();
 
 function recordRoomBurnedInMemory(roomId) {
   if (!roomId) return;
   burnedRoomIds.add(roomId);
-  try {
-    const list = Array.from(burnedRoomIds).slice(-50);
-    window.name = `siyu_mem:${JSON.stringify(list)}`;
-  } catch {
-    // 忽略异常
-  }
+  syncWindowMemoryState();
 }
 
 // 当前房间运行态（全部驻留内存，离开即销毁）
 let activeRooms = [];
 let activeRoomId = null;
 let roomCryptoKeyPromise = null;
+let preEncryptedLeaveFrameStr = null;
 let p2pDispatchers = [];
 let e2eeWssClients = [];
 let presenceHeartbeatTimer = null;
 let localEphemeralBus = null;
 let connectedPeers = new Set();
-let roomParticipants = new Map(); // peerId -> { id, alias, color, bg, joinedAt }
+let roomParticipants = new Map(); // peerId -> { id, alias, color, bg, joinedAt, lastSeenAt }
+let pendingCapacityChecks = new Map(); // candidateId -> { checkId, packet, aliveSet, timer }
 let maxRoomCapacity = 2;          // 默认最大人数为 2，最高可设为 5
 let selfJoinedAt = 0;
 let isSessionTerminated = false;
@@ -256,6 +273,8 @@ if (globalRegistryBus) {
       if (activeRoomId === data.roomId && !isSessionTerminated) {
         terminateAndBurnSession({ notifyPeer: false, mode: 'scattered' });
       }
+    } else if (data.kind === 'peer-left-room' && data.roomId === activeRoomId && data.senderId) {
+      handlePeerDeparture(data.senderId);
     } else if (data.kind === 'query-room-state' && data.roomId && data.requesterId !== selfId) {
       // 如果查询的房间已被销毁，立即告知对方该链接已失效
       if (burnedRoomIds.has(data.roomId)) {
@@ -267,19 +286,9 @@ if (globalRegistryBus) {
         });
         return;
       }
-      // 如果查询的正是当前所在活跃房间，检查人数是否已满或有人正在长椅等候
+      // 如果查询的正是当前所在活跃房间，先清理超时幽灵座位，再回传长椅等候状态（人数上限统一由实时 ping-alive 验活后裁定）
       if (activeRoomId === data.roomId && !isSessionTerminated) {
-        const currentCount = getAdmittedParticipantCount();
-        if (!roomParticipants.has(data.requesterId) && currentCount >= maxRoomCapacity) {
-          globalRegistryBus.postMessage({
-            kind: 'room-state-reply',
-            roomId: data.roomId,
-            targetPeerId: data.requesterId,
-            status: 'full',
-            maxCapacity: maxRoomCapacity
-          });
-          return;
-        }
+        pruneStaleParticipants();
         globalRegistryBus.postMessage({
           kind: 'room-state-reply',
           roomId: data.roomId,
@@ -612,6 +621,121 @@ function getAdmittedParticipantCount() {
   return Math.max(1, roomParticipants.size);
 }
 
+/**
+ * 清理因浏览器直接关闭/断网而未发出离席信号的超时幽灵座位，防止误报“房间人数已满”
+ */
+function pruneStaleParticipants(maxAgeMs = PEER_STALE_TIMEOUT_MS) {
+  const now = Date.now();
+  let removedAny = false;
+  for (const [peerId, info] of roomParticipants.entries()) {
+    if (peerId === selfId) {
+      info.lastSeenAt = now;
+      continue;
+    }
+    const lastActive = info.lastSeenAt || info.joinedAt || 0;
+    if (now - lastActive > maxAgeMs) {
+      connectedPeers.delete(peerId);
+      roomParticipants.delete(peerId);
+      removedAny = true;
+    }
+  }
+  if (removedAny) {
+    updateConnectionStatusUI();
+  }
+  return removedAny;
+}
+
+function clearPendingCapacityChecks() {
+  for (const item of pendingCapacityChecks.values()) {
+    if (item.timer) clearTimeout(item.timer);
+  }
+  pendingCapacityChecks.clear();
+}
+
+/**
+ * 当新成员请求进入且本地名册看似已满时，先向名册内所有旧成员发起 950ms 实时存活点名（ping-alive -> pong-alive）：
+ * - 未响应 pong-alive 的旧成员即判定为已退出浏览器的幽灵座位，立即剔除并放行新成员进入；
+ * - 仅当所有座位均在 950ms 内实时回复了 pong-alive（确系真正在线满员），才向超员后进者发送 room-full。
+ */
+function verifyLivePeersBeforeDecision(candidatePacket) {
+  if (!candidatePacket || !candidatePacket.senderId || isSessionTerminated) return;
+  const candidateId = candidatePacket.senderId;
+
+  if (roomParticipants.has(candidateId)) return;
+  pruneStaleParticipants();
+
+  if (roomParticipants.size < maxRoomCapacity) {
+    admitAndRegisterPeer(candidateId, candidatePacket.profile, candidatePacket.joinedAt);
+    broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
+    syncInMemoryHistoryToPeers();
+    acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+    return;
+  }
+
+  // 若已在对该候选人做实时验活点名，仅更新其最新握手包，不重复开启定时器
+  if (pendingCapacityChecks.has(candidateId)) {
+    pendingCapacityChecks.get(candidateId).packet = candidatePacket;
+    return;
+  }
+
+  const checkId = createMessageId();
+  const aliveSet = new Set([selfId]);
+
+  const timer = setTimeout(() => {
+    const entry = pendingCapacityChecks.get(candidateId);
+    pendingCapacityChecks.delete(candidateId);
+    if (!entry || !activeRoomId || isSessionTerminated) return;
+
+    // 剔除所有未响应本次实时点名的离线幽灵座位
+    let evictedGhost = false;
+    for (const [peerId] of roomParticipants.entries()) {
+      if (peerId !== selfId && !entry.aliveSet.has(peerId)) {
+        connectedPeers.delete(peerId);
+        roomParticipants.delete(peerId);
+        evictedGhost = true;
+      }
+    }
+    if (evictedGhost) {
+      updateConnectionStatusUI();
+    }
+
+    const latestPkt = entry.packet;
+    if (roomParticipants.has(candidateId) || roomParticipants.size < maxRoomCapacity) {
+      admitAndRegisterPeer(candidateId, latestPkt.profile, latestPkt.joinedAt);
+      broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
+      syncInMemoryHistoryToPeers();
+      acknowledgeUnreadReceivedMessages({ forceResendAll: true });
+      return;
+    }
+
+    // 所有座位均已实时回复 pong-alive，确系真实满员，此时才拒绝后进的超员连接
+    const latestAdmittedJoinTime = Math.max(
+      ...Array.from(roomParticipants.values()).map((p) => p.joinedAt || 0)
+    );
+    if ((latestPkt.joinedAt || Date.now()) >= latestAdmittedJoinTime) {
+      broadcastEnvelopePacket({
+        kind: 'room-full',
+        senderId: selfId,
+        targetPeerId: candidateId,
+        maxCapacity: maxRoomCapacity
+      });
+    }
+  }, LIVE_CAPACITY_CHECK_MS);
+
+  pendingCapacityChecks.set(candidateId, {
+    checkId,
+    packet: candidatePacket,
+    aliveSet,
+    timer
+  });
+
+  broadcastEnvelopePacket({
+    kind: 'ping-alive',
+    checkId,
+    senderId: selfId
+  });
+}
+
 function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase = '' } = {}) {
   // 若该房间链接已被标记为结束销毁，立即拦截并提示“连接已失效”
   if (burnedRoomIds.has(roomId)) {
@@ -620,6 +744,7 @@ function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase
   }
 
   stopBenchRoomPresenceProbe();
+  clearPendingCapacityChecks();
 
   if (activeRooms.length > 0 || e2eeWssClients.length > 0 || localEphemeralBus) {
     cleanupMemoryAndLeaveRoom({ silent: true });
@@ -637,6 +762,24 @@ function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase
 
   selfJoinedAt = isCreator ? Date.now() - 10 : Date.now();
   roomCryptoKeyPromise = deriveRoomAesKey(roomId);
+  preEncryptedLeaveFrameStr = null;
+  (async () => {
+    try {
+      const leavePlain = JSON.stringify({ kind: 'peer-leave', senderId: selfId });
+      const enc = await encryptRoomText(leavePlain, roomCryptoKeyPromise);
+      if (enc && activeRoomId === roomId) {
+        preEncryptedLeaveFrameStr = JSON.stringify({
+          s: selfId,
+          allowSelf: false,
+          iv: enc.iv,
+          ct: enc.ct
+        });
+      }
+    } catch {
+      // 忽略预加密异常
+    }
+  })();
+
   connectedPeers.clear();
   roomParticipants.clear();
 
@@ -654,7 +797,8 @@ function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase
     alias: myProfile.alias,
     color: myProfile.color,
     bg: myProfile.bg,
-    joinedAt: selfJoinedAt
+    joinedAt: selfJoinedAt,
+    lastSeenAt: Date.now()
   });
 
   const inviteUrl = buildInviteUrl(roomId);
@@ -716,12 +860,13 @@ function enterRoom(roomId, { isCreator = false, isBenchRoom = false, benchPhrase
     bus.postMessage(buildHelloPacket('hello'));
   }
 
-  // 4. 定时发送在线心跳与人数/屏幕共享状态同步探针
+  // 4. 定时发送在线心跳并自动清理断线/退出的超时幽灵座位
   if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
   presenceHeartbeatTimer = setInterval(() => {
     if (!activeRoomId || isSessionTerminated) return;
+    pruneStaleParticipants();
     broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
-  }, 2800);
+  }, 2200);
 
   messageInputEl.focus();
 }
@@ -785,6 +930,33 @@ function handlePeerDeparture(peerId) {
 function handleEnvelopePacket(packet) {
   if (!packet || packet.senderId === selfId || isSessionTerminated) return;
 
+  // 刷新已登记成员的最后活跃心跳时间戳
+  if (packet.senderId && roomParticipants.has(packet.senderId)) {
+    const existingInfo = roomParticipants.get(packet.senderId);
+    if (existingInfo) {
+      existingInfo.lastSeenAt = Date.now();
+    }
+  }
+
+  // 0. 实时存活点名探针响应（用于新成员进房时快速甄别并清理已退出浏览器的幽灵座位）
+  if (packet.kind === 'ping-alive' && packet.checkId) {
+    broadcastEnvelopePacket({
+      kind: 'pong-alive',
+      checkId: packet.checkId,
+      senderId: selfId
+    });
+    return;
+  }
+
+  if (packet.kind === 'pong-alive' && packet.checkId) {
+    for (const checkEntry of pendingCapacityChecks.values()) {
+      if (checkEntry.checkId === packet.checkId || roomParticipants.has(packet.senderId)) {
+        checkEntry.aliveSet.add(packet.senderId);
+      }
+    }
+    return;
+  }
+
   // 1. 收到全员结束销毁指令或墓碑状态 -> 所有人立即退出到结束界面，并将房间链接标记为永久失效
   if (packet.kind === 'terminate') {
     if (activeRoomId) recordRoomBurnedInMemory(activeRoomId);
@@ -828,48 +1000,25 @@ function handleEnvelopePacket(packet) {
     return;
   }
 
-  // 3. 处理对端握手与人数上限门禁校验
+  if (packet.kind === 'peer-leave') {
+    handlePeerDeparture(packet.senderId);
+    return;
+  }
+
+  // 3. 处理对端握手与人数上限门禁校验（先清理超时座位，满员时先验活再裁决）
   if (packet.kind === 'hello' || packet.kind === 'hello-ack') {
     if (typeof packet.maxCapacity === 'number' && packet.maxCapacity >= 2 && packet.maxCapacity <= 5) {
-      // 采纳更早进入房间者（房主）设定的上限
       if ((packet.joinedAt || 0) < selfJoinedAt) {
         maxRoomCapacity = packet.maxCapacity;
         if (maxPeersSelectEl) maxPeersSelectEl.value = String(maxRoomCapacity);
       }
     }
 
+    pruneStaleParticipants();
     const isExistingPeer = roomParticipants.has(packet.senderId);
-    if (!isExistingPeer) {
-      // 若当前房间人数已达到上限，且新来者晚于本房间现有成员，拒绝其加入
-      if (roomParticipants.size >= maxRoomCapacity) {
-        const latestAdmittedJoinTime = Math.max(
-          ...Array.from(roomParticipants.values()).map((p) => p.joinedAt || 0)
-        );
-        if ((packet.joinedAt || Date.now()) >= latestAdmittedJoinTime) {
-          broadcastEnvelopePacket({
-            kind: 'room-full',
-            senderId: selfId,
-            targetPeerId: packet.senderId,
-            maxCapacity: maxRoomCapacity
-          });
-          return;
-        }
-      }
-
-      // 若对方发来的已准入名单已满且不包含本端，说明本端是超员后进者，主动退出并提示无法加入
-      if (
-        Array.isArray(packet.admittedIds) &&
-        packet.admittedIds.length >= maxRoomCapacity &&
-        !packet.admittedIds.includes(selfId) &&
-        (packet.joinedAt || 0) < selfJoinedAt
-      ) {
-        terminateAndBurnSession({
-          notifyPeer: false,
-          mode: 'full',
-          maxCap: maxRoomCapacity
-        });
-        return;
-      }
+    if (!isExistingPeer && roomParticipants.size >= maxRoomCapacity) {
+      verifyLivePeersBeforeDecision(packet);
+      return;
     }
 
     // 准入该成员并登记其国风代号
@@ -888,15 +1037,11 @@ function handleEnvelopePacket(packet) {
     return;
   }
 
-  // 非准入成员的消息不予处理
+  // 非准入成员的消息：先清理超时座位，若仍满员则触发实时验活点名
   if (!roomParticipants.has(packet.senderId)) {
+    pruneStaleParticipants();
     if (roomParticipants.size >= maxRoomCapacity) {
-      broadcastEnvelopePacket({
-        kind: 'room-full',
-        senderId: selfId,
-        targetPeerId: packet.senderId,
-        maxCapacity: maxRoomCapacity
-      });
+      verifyLivePeersBeforeDecision(packet);
       return;
     }
     admitAndRegisterPeer(packet.senderId, packet.profile, packet.joinedAt);
@@ -942,13 +1087,15 @@ function admitAndRegisterPeer(peerId, profile, joinedAt) {
   const wasConnected = connectedPeers.has(peerId);
   connectedPeers.add(peerId);
 
+  const existing = roomParticipants.get(peerId);
   const fallback = pickInitialProfile(peerId);
   roomParticipants.set(peerId, {
     id: peerId,
-    alias: profile?.alias || fallback.alias,
-    color: profile?.color || fallback.color,
-    bg: profile?.bg || fallback.bg,
-    joinedAt: joinedAt || Date.now()
+    alias: profile?.alias || existing?.alias || fallback.alias,
+    color: profile?.color || existing?.color || fallback.color,
+    bg: profile?.bg || existing?.bg || fallback.bg,
+    joinedAt: existing?.joinedAt || joinedAt || Date.now(),
+    lastSeenAt: Date.now()
   });
 
   // 如果自己的默认代号与更早进房间的成员撞名，自动切换为下一个国风代号
@@ -2657,8 +2804,11 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, scatt
   const closingRooms = activeRooms.slice();
   const closingP2pDispatchers = p2pDispatchers.slice();
   const closingLocalBus = localEphemeralBus;
+  const closingPreEncryptedLeave = preEncryptedLeaveFrameStr;
 
   stopTitleFlash();
+  clearPendingCapacityChecks();
+  preEncryptedLeaveFrameStr = null;
 
   if (presenceHeartbeatTimer) {
     clearInterval(presenceHeartbeatTimer);
@@ -2720,6 +2870,30 @@ function cleanupMemoryAndLeaveRoom({ notifyPeer = false, burnRoom = false, scatt
         closingLocalBus.postMessage(outPacket);
       } catch {
         // 忽略异常
+      }
+    }
+    if (!burnRoom && !scatterKeep && globalRegistryBus) {
+      try {
+        globalRegistryBus.postMessage({
+          kind: 'peer-left-room',
+          roomId: closingRoomId,
+          senderId: selfId
+        });
+      } catch {
+        // 忽略异常
+      }
+    }
+
+    // 单人退出/关闭浏览器时：立即同步发送预加密的 peer-leave 帧，避免移动端 pagehide 冻结异步 Promise 导致残留幽灵座位
+    if (!burnRoom && !scatterKeep && closingPreEncryptedLeave) {
+      for (const c of closingWssClients) {
+        if (c.ready && c.ws.readyState === WebSocket.OPEN) {
+          try {
+            c.ws.send(buildMqttPublishPacket(c.liveTopic, closingPreEncryptedLeave, { retain: false }));
+          } catch {
+            // 忽略异常
+          }
+        }
       }
     }
 
@@ -2965,11 +3139,19 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     stopTitleFlash();
     acknowledgeUnreadReceivedMessages();
+    if (activeRoomId && !isSessionTerminated) {
+      pruneStaleParticipants();
+      broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
+    }
   }
 });
 window.addEventListener('focus', () => {
   stopTitleFlash();
   acknowledgeUnreadReceivedMessages();
+  if (activeRoomId && !isSessionTerminated) {
+    pruneStaleParticipants();
+    broadcastEnvelopePacket(buildHelloPacket('hello-ack'));
+  }
 });
 
 /**

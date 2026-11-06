@@ -10,7 +10,21 @@ const genId = (len = 20) => {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 };
 
-export const selfId = genId(20);
+function resolveSessionSelfId() {
+  try {
+    if (typeof window !== 'undefined' && window.name && window.name.startsWith('siyu_mem:')) {
+      const parsed = JSON.parse(window.name.slice(9));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.selfId === 'string' && parsed.selfId.length >= 12) {
+        return parsed.selfId;
+      }
+    }
+  } catch {
+    // 忽略异常
+  }
+  return genId(20);
+}
+
+export const selfId = resolveSessionSelfId();
 
 const DEFAULT_RELAYS = [
   'wss://nos.lol',
