@@ -491,6 +491,26 @@ async function toggleWindChime() {
   }
 }
 
+const PUBLIC_WEB_ORIGIN_URL = 'https://siyu-whisper.github.io/siyu/';
+
+function isRunningInAndroidApp() {
+  return (
+    Boolean(window.SiyuAndroidBridge) ||
+    window.location.hostname === 'siyu.app.local' ||
+    window.location.protocol === 'file:'
+  );
+}
+
+function extractDirectRoomIdFromText(rawText) {
+  const text = (rawText || '').trim();
+  if (!text) return null;
+  const urlMatch = text.match(/(?:[#?&]room=|^room=)([A-Za-z0-9_-]{8,64})/i);
+  if (urlMatch && urlMatch[1]) {
+    return urlMatch[1].trim();
+  }
+  return null;
+}
+
 function parseRoomIdFromHash() {
   const rawHash = window.location.hash || '';
   if (!rawHash.startsWith('#')) return null;
@@ -505,6 +525,9 @@ function parseRoomIdFromHash() {
 }
 
 function buildInviteUrl(roomId) {
+  if (isRunningInAndroidApp()) {
+    return `${PUBLIC_WEB_ORIGIN_URL}#room=${roomId}`;
+  }
   const baseUrl = `${window.location.origin}${window.location.pathname}`;
   return `${baseUrl}#room=${roomId}`;
 }
@@ -3196,12 +3219,13 @@ async function probeBenchRoomPresence(rawPhrase) {
   if (!trimmed || trimmed.length < 2) {
     if (benchProbeBoxEl && benchProbeTextEl) {
       benchProbeBoxEl.classList.remove('is-waiting');
-      benchProbeTextEl.textContent = '输入暗语后，将自动聆听长椅上是否有微风与风铃...';
+      benchProbeTextEl.textContent = '输入暗语或粘贴密函链接后，将自动聆听房间内是否有微风与风铃...';
     }
     return;
   }
 
-  const derivedRoomId = await deriveBenchRoomIdFromPhrase(trimmed);
+  const directRoomId = extractDirectRoomIdFromText(trimmed);
+  const derivedRoomId = directRoomId || (await deriveBenchRoomIdFromPhrase(trimmed));
   if (!derivedRoomId) return;
   activeBenchProbeRoomId = derivedRoomId;
 
@@ -3305,8 +3329,18 @@ function closeBenchModal() {
 async function confirmEnterBenchRoom() {
   const phrase = benchPhraseInputEl ? benchPhraseInputEl.value.trim() : '';
   if (!phrase || phrase.length < 2) {
-    showToast('请输入至少 2 个字符的专属长椅暗语');
+    showToast('请输入至少 2 个字符的专属长椅暗语，或直接粘贴密函链接');
     if (benchPhraseInputEl) benchPhraseInputEl.focus();
+    return;
+  }
+  const directRoomId = extractDirectRoomIdFromText(phrase);
+  if (directRoomId) {
+    closeBenchModal();
+    enterRoom(directRoomId, {
+      isCreator: false,
+      isBenchRoom: directRoomId.startsWith('bench_'),
+      benchPhrase: ''
+    });
     return;
   }
   const derivedRoomId = await deriveBenchRoomIdFromPhrase(phrase);
@@ -3367,7 +3401,12 @@ copyLinkBtn.addEventListener('click', async () => {
   const url = inviteLinkInputEl.value;
   if (!url) return;
   try {
-    await navigator.clipboard.writeText(url);
+    if (window.SiyuAndroidBridge && typeof window.SiyuAndroidBridge.copyText === 'function') {
+      window.SiyuAndroidBridge.copyText(url);
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(url);
+    }
     showToast(`私语链接已复制（当前上限 ${maxRoomCapacity} 人）`);
   } catch {
     inviteLinkInputEl.select();
@@ -3818,18 +3857,65 @@ function showToast(text) {
   }, 2600);
 }
 
-// 14. 监听地址栏 #room= 变化
+// 14. 监听地址栏 #room= 变化与安卓原生返回键/深度链接桥接
 window.addEventListener('hashchange', () => {
   const hashRoomId = parseRoomIdFromHash();
   if (hashRoomId && hashRoomId !== activeRoomId) {
-    enterRoom(hashRoomId, { isCreator: false });
+    enterRoom(hashRoomId, {
+      isCreator: false,
+      isBenchRoom: hashRoomId.startsWith('bench_')
+    });
   }
 });
 
+window.handleAndroidDeepLink = function handleAndroidDeepLink(rawInput) {
+  const roomId = extractDirectRoomIdFromText(rawInput);
+  if (roomId && roomId !== activeRoomId) {
+    closeBenchModal();
+    enterRoom(roomId, {
+      isCreator: false,
+      isBenchRoom: roomId.startsWith('bench_')
+    });
+    return true;
+  }
+  return false;
+};
+
+window.handleAndroidBackPress = function handleAndroidBackPress() {
+  if (imageLightboxEl && !imageLightboxEl.classList.contains('hidden')) {
+    closeImageLightbox();
+    return true;
+  }
+  if (benchModalEl && !benchModalEl.classList.contains('hidden')) {
+    closeBenchModal();
+    return true;
+  }
+  if (emojiPickerPopoverEl && !emojiPickerPopoverEl.classList.contains('hidden')) {
+    closeEmojiPicker();
+    return true;
+  }
+  if (activeRoomId && !isSessionTerminated) {
+    terminateAndBurnSession({ notifyPeer: true, mode: 'scattered' });
+    return true;
+  }
+  if (terminatedViewEl && !terminatedViewEl.classList.contains('hidden')) {
+    backHomeBtn.click();
+    return true;
+  }
+  return false;
+};
+
 // ==================== 应用启动入口：检查 URL #room=<房间ID> ====================
 (function bootstrap() {
+  const apkLinkEl = document.getElementById('download-apk-link');
+  if (apkLinkEl && isRunningInAndroidApp()) {
+    apkLinkEl.classList.add('hidden');
+  }
   const initialRoomId = parseRoomIdFromHash();
   if (initialRoomId) {
-    enterRoom(initialRoomId, { isCreator: false });
+    enterRoom(initialRoomId, {
+      isCreator: false,
+      isBenchRoom: initialRoomId.startsWith('bench_')
+    });
   }
 })();

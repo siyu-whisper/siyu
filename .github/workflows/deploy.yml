@@ -20,13 +20,93 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Java 17 for Android APK build
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Install dependencies
         run: npm install
+
+      - name: Build web bundle for Android APK
+        env:
+          VITE_BASE_PATH: ./
+        run: npx vite build --outDir android/app/src/main/assets/www
+
+      - name: Compile and sign Android APK (siyu-android.apk)
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS="$(ls -d "$SDK_ROOT/build-tools/"* | sort -V | tail -n 1)"
+          PLATFORM_JAR="$(ls "$SDK_ROOT/platforms/"*/android.jar | sort -V | tail -n 1)"
+          echo "Using BUILD_TOOLS=$BUILD_TOOLS"
+          echo "Using PLATFORM_JAR=$PLATFORM_JAR"
+
+          rm -rf build-apk release
+          mkdir -p build-apk/gen build-apk/classes build-apk/dex release
+
+          "$BUILD_TOOLS/aapt2" compile --dir android/app/src/main/res -o build-apk/res.zip
+
+          "$BUILD_TOOLS/aapt2" link \
+            -o build-apk/unaligned.apk \
+            -I "$PLATFORM_JAR" \
+            --manifest android/app/src/main/AndroidManifest.xml \
+            -A android/app/src/main/assets \
+            --java build-apk/gen \
+            --auto-add-overlay \
+            build-apk/res.zip
+
+          javac --release 11 \
+            -cp "$PLATFORM_JAR" \
+            -d build-apk/classes \
+            $(find android/app/src/main/java build-apk/gen -name "*.java")
+
+          "$BUILD_TOOLS/d8" \
+            --lib "$PLATFORM_JAR" \
+            --min-api 24 \
+            --output build-apk/dex \
+            $(find build-apk/classes -name "*.class")
+
+          (cd build-apk/dex && zip -uj ../unaligned.apk classes.dex)
+
+          "$BUILD_TOOLS/zipalign" -p -f 4 build-apk/unaligned.apk build-apk/aligned.apk
+
+          keytool -genkeypair -v \
+            -keystore build-apk/siyu-release.jks \
+            -alias siyu \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass siyu123456 \
+            -keypass siyu123456 \
+            -dname "CN=Siyu Whisper, OU=Privacy, O=Siyu, L=Suzhou, S=Jiangsu, C=CN"
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks build-apk/siyu-release.jks \
+            --ks-key-alias siyu \
+            --ks-pass pass:siyu123456 \
+            --key-pass pass:siyu123456 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --out release/siyu-android.apk \
+            build-apk/aligned.apk
+
+          "$BUILD_TOOLS/apksigner" verify --verbose release/siyu-android.apk
+          ls -lh release/siyu-android.apk
 
       - name: Build static site
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
-        run: npm run build
+        run: |
+          npm run build
+          cp release/siyu-android.apk dist/siyu-android.apk
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: siyu-android-apk
+          path: release/siyu-android.apk
 
       - name: Deploy dist/ to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4

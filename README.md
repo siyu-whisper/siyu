@@ -9,6 +9,7 @@
 极简 · 免安装 · 免注册 · 零服务器存储 · 点对点端到端加密 · 阅后即焚临时私密聊天空间
 
 [![在线体验 GitHub Pages](https://img.shields.io/badge/在线体验-siyu--whisper.github.io%2Fsiyu-494266?style=for-the-badge)](https://siyu-whisper.github.io/siyu/)
+[![下载安卓 App APK](https://img.shields.io/badge/安卓App下载-siyu--android.apk-3B6E6C?style=for-the-badge)](https://siyu-whisper.github.io/siyu/siyu-android.apk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-E9E8EF?style=for-the-badge&labelColor=494266&color=E9E8EF)](./LICENSE)
 [![E2EE](https://img.shields.io/badge/加密算法-WebRTC%20%2B%20AES--GCM--256-494266?style=for-the-badge)](#五技术架构与安全原理)
 [![Zero Storage](https://img.shields.io/badge/持久化存储-0%20Byte%20纯内存驻留-3B6E6C?style=for-the-badge)](#五技术架构与安全原理)

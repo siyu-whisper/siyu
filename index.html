@@ -3,9 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#E9E8EF" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="referrer" content="no-referrer" />
   <title>私语 · 安静的聊聊心事</title>
   <link rel="icon" type="image/svg+xml" href="./logo.svg" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./style.css" />
   <script type="importmap">
     {
@@ -75,6 +81,11 @@
             <span>凭暗语 · 去我们的长椅</span>
             <span id="landing-bench-waiting-dot" class="bench-waiting-dot hidden" title="微风已至 · TA 正候你"></span>
           </button>
+
+          <a id="download-apk-link" href="./siyu-android.apk" download="私语-Siyu-v1.0.apk" class="apk-download-link" title="下载私语安卓客户端 APK（与网页版 100% 互通）">
+            <span aria-hidden="true">📱</span>
+            <span>下载安卓 App (APK · 与网页版互通)</span>
+          </a>
         </div>
       </div>
     </section>
@@ -422,13 +433,13 @@
       </p>
 
       <div class="bench-input-group">
-        <label class="bench-input-label" for="bench-phrase-input">你们的专属长椅暗语</label>
+        <label class="bench-input-label" for="bench-phrase-input">你们的专属长椅暗语（或直接粘贴对方发来的密函链接）</label>
         <input
           id="bench-phrase-input"
           type="text"
           class="bench-phrase-input"
-          maxlength="48"
-          placeholder="例如：晚风与热茶-1024"
+          maxlength="180"
+          placeholder="例如：晚风与热茶-1024 或粘贴 #room= 链接"
           autocomplete="off"
           spellcheck="false"
         />

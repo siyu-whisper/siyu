@@ -299,6 +299,29 @@ body {
   line-height: 1;
 }
 
+.apk-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink-secondary);
+  background: rgba(73, 66, 102, 0.06);
+  border: 1px dashed rgba(73, 66, 102, 0.24);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: all 0.16s ease;
+}
+
+.apk-download-link:hover {
+  color: var(--brand-purple);
+  background: rgba(73, 66, 102, 0.12);
+  border-color: var(--brand-purple);
+}
+
 .bench-waiting-dot {
   width: 8px;
   height: 8px;
